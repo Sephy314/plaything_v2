@@ -1,0 +1,1 @@
+"""Minecraft feature — command skeletons."""

@@ -1,0 +1,39 @@
+name: plaything
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: plaything-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: plaything
+      POSTGRES_PASSWORD: plaything
+      POSTGRES_DB: plaything
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U plaything"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  bot:
+    build: .
+    container_name: plaything-bot
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_DSN: postgresql://plaything:plaything@postgres:5432/plaything
+    volumes:
+      - bot_logs:/app/logs
+    command: ["python", "-m", "bot.main"]
+
+volumes:
+  postgres_data:
+  bot_logs:

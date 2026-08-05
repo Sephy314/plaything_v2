@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Environment
+.env
+*.env
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+
+# Test / cache
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Alembic local caches (not the scripts themselves)
+migrations/__pycache__/
