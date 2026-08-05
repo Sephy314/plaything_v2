@@ -14,6 +14,10 @@ RUN apt-get update \
        ffmpeg \
        libopus0 \
        libsodium23 \
+       libavformat59 \
+       libavcodec59 \
+       libavutil57 \
+       libswresample4 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml alembic.ini ./
