@@ -15,6 +15,7 @@ from core.logger import async_logger_consumer, get_logger, setup_logging
 from core.scheduler import scheduler_heartbeat
 
 COGS = [
+    "features.help.commands",
     "features.minecraft.commands",
     "features.music.commands",
     "features.tts.commands",

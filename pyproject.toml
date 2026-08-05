@@ -51,6 +51,7 @@ packages = [
     "voice.music",
     "utils",
     "features",
+    "features.help",
     "features.minecraft",
     "features.tts",
     "features.music",
