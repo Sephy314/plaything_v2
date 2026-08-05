@@ -106,7 +106,7 @@ async def _run(container, log_queue: asyncio.Queue[str]) -> None:
     await container.database.connect()
     await _run_migrations(container)
 
-    bot = create_bot(BOT_PREFIX, sync_commands=False)
+    bot = create_bot(BOT_PREFIX, sync_commands=True)
     container.bind_bot(bot)
     bot.database = container.database
     bot.container = container

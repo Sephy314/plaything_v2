@@ -42,7 +42,9 @@ def create_bot(prefix: str, *, sync_commands: bool = False) -> commands.Bot:
     async def on_ready() -> None:
         log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
         if sync_commands:
+            log.info("syncing %d application commands", len(bot.tree._get_all_commands()))
             await bot.tree.sync()
+            log.info("application commands synced")
 
     @bot.event
     async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
@@ -65,5 +67,9 @@ async def load_cogs(bot: commands.Bot, cogs: list[str]) -> None:
         cogs: Fully-qualified cog module paths.
     """
     for path in cogs:
-        await bot.load_extension(path)
-        log.info("loaded cog %s", path)
+        try:
+            await bot.load_extension(path)
+            log.info("loaded cog %s", path)
+        except Exception as exc:
+            log.error("failed to load cog %s: %s", path, exc, exc_info=exc)
+            raise
