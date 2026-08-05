@@ -20,10 +20,23 @@ async def voice_autocomplete(
 ) -> list[app_commands.Choice[str]]:
     """Autocomplete for voice ID parameter with language-specific voices."""
     try:
-        from core.container import container
-        voices = container.tts_voice_service.list_voices()
+        from core.container import container, get_container
         
-        # Filter voices by current input
+        # Handle both initialized and uninitialized container
+        try:
+            service = container.tts_voice_service if container else None
+        except:
+            service = None
+        
+        if not service:
+            try:
+                service = get_container().tts_voice_service
+            except RuntimeError:
+                return []
+        
+        voices = service.list_voices()
+        
+        # Filter voices by current input (prefix match only)
         filtered = [v for v in voices if v.lower().startswith(current.lower())]
         
         # Create choices with language indicators
@@ -35,6 +48,8 @@ async def voice_autocomplete(
                 lang_indicator = " 🇰🇷"
             elif voice.startswith("en"):
                 lang_indicator = " 🇺🇸"
+            elif voice == "default":
+                lang_indicator = " 🔤"
             
             choices.append(
                 app_commands.Choice(
@@ -44,7 +59,7 @@ async def voice_autocomplete(
             )
         return choices
     except Exception as e:
-        log.debug("voice_autocomplete error: %s", e)
+        log.error("voice_autocomplete failed: %s", e, exc_info=True)
         return []
 
 

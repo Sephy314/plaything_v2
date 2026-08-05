@@ -58,32 +58,45 @@ async def server_autocomplete(
 ) -> list[app_commands.Choice[str]]:
     """Autocomplete for server alias parameter."""
     try:
-        from core.container import container
-        servers = await container.minecraft_service.list_servers()
-        aliases = [s.alias for s in servers]
+        from core.container import container, get_container
+        
+        # Handle both initialized and uninitialized container
+        try:
+            service = container.minecraft_service if container else None
+        except:
+            service = None
+        
+        if not service:
+            try:
+                service = get_container().minecraft_service
+            except RuntimeError:
+                # Container not yet initialized
+                return []
+        
+        servers = await service.list_servers()
         
         # Filter with both prefix and partial matching
-        filtered = [a for a in aliases if _contains_match(a, current)]
+        filtered = [s.alias for s in servers if _contains_match(s.alias, current)]
         
-        # Create choices with descriptions showing server status
+        # Create choices
         choices = []
         for alias in filtered[:25]:
-            # Find the server to get its status
             server = next((s for s in servers if s.alias == alias), None)
-            if server:
-                from features.minecraft.models import STATUS_RUNNING
-                status = "🟢 실행중" if server.status == STATUS_RUNNING else "🔴 정지"
-                description = f"포트 {server.port} - {status}"
-                choices.append(
-                    app_commands.Choice(
-                        name=alias,
-                        value=alias,
-                        name_localizations={"ko": alias},
-                    )
+            if not server:
+                continue
+                
+            from features.minecraft.models import STATUS_RUNNING
+            status_str = "🟢 실행중" if server.status == STATUS_RUNNING else "🔴 정지"
+            choices.append(
+                app_commands.Choice(
+                    name=f"{alias} {status_str}",
+                    value=alias,
                 )
+            )
+        
         return choices
     except Exception as e:
-        log.debug("server_autocomplete error: %s", e)
+        log.error("server_autocomplete failed: %s", e, exc_info=True)
         return []
 
 
@@ -93,19 +106,33 @@ async def server_running_autocomplete(
 ) -> list[app_commands.Choice[str]]:
     """Autocomplete for running server aliases only."""
     try:
-        from core.container import container
+        from core.container import container, get_container
         from features.minecraft.models import STATUS_RUNNING
         
-        servers = await container.minecraft_service.list_servers()
-        running = [s.alias for s in servers if s.status == STATUS_RUNNING]
-        filtered = [a for a in running if _contains_match(a, current)]
+        # Handle both initialized and uninitialized container
+        try:
+            service = container.minecraft_service if container else None
+        except:
+            service = None
+        
+        if not service:
+            try:
+                service = get_container().minecraft_service
+            except RuntimeError:
+                return []
+        
+        servers = await service.list_servers()
+        running = [s for s in servers if s.status == STATUS_RUNNING]
+        
+        # Filter by current input
+        filtered = [s.alias for s in running if _contains_match(s.alias, current)]
         
         return [
             app_commands.Choice(name=alias, value=alias)
             for alias in filtered[:25]
         ]
     except Exception as e:
-        log.debug("server_running_autocomplete error: %s", e)
+        log.error("server_running_autocomplete failed: %s", e, exc_info=True)
         return []
 
 
