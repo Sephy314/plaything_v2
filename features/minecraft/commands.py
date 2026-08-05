@@ -38,6 +38,20 @@ log = get_logger(__name__)
 # ------------------------------------------------------------------
 
 
+def _contains_match(text: str, current: str) -> bool:
+    """Check if text matches current input (case-insensitive, partial match)."""
+    current_lower = current.lower()
+    text_lower = text.lower()
+    
+    # Exact prefix match
+    if text_lower.startswith(current_lower):
+        return True
+    # Partial word match (for Korean names with spaces)
+    if current_lower in text_lower:
+        return True
+    return False
+
+
 async def server_autocomplete(
     interaction: discord.Interaction,
     current: str,
@@ -47,12 +61,29 @@ async def server_autocomplete(
         from core.container import container
         servers = await container.minecraft_service.list_servers()
         aliases = [s.alias for s in servers]
-        filtered = [a for a in aliases if a.lower().startswith(current.lower())]
-        return [
-            app_commands.Choice(name=alias, value=alias)
-            for alias in filtered[:25]
-        ]
-    except Exception:
+        
+        # Filter with both prefix and partial matching
+        filtered = [a for a in aliases if _contains_match(a, current)]
+        
+        # Create choices with descriptions showing server status
+        choices = []
+        for alias in filtered[:25]:
+            # Find the server to get its status
+            server = next((s for s in servers if s.alias == alias), None)
+            if server:
+                from features.minecraft.models import STATUS_RUNNING
+                status = "🟢 실행중" if server.status == STATUS_RUNNING else "🔴 정지"
+                description = f"포트 {server.port} - {status}"
+                choices.append(
+                    app_commands.Choice(
+                        name=alias,
+                        value=alias,
+                        name_localizations={"ko": alias},
+                    )
+                )
+        return choices
+    except Exception as e:
+        log.debug("server_autocomplete error: %s", e)
         return []
 
 
@@ -64,14 +95,17 @@ async def server_running_autocomplete(
     try:
         from core.container import container
         from features.minecraft.models import STATUS_RUNNING
+        
         servers = await container.minecraft_service.list_servers()
         running = [s.alias for s in servers if s.status == STATUS_RUNNING]
-        filtered = [a for a in running if a.lower().startswith(current.lower())]
+        filtered = [a for a in running if _contains_match(a, current)]
+        
         return [
             app_commands.Choice(name=alias, value=alias)
             for alias in filtered[:25]
         ]
-    except Exception:
+    except Exception as e:
+        log.debug("server_running_autocomplete error: %s", e)
         return []
 
 
@@ -80,11 +114,18 @@ async def scope_autocomplete(
     current: str,
 ) -> list[app_commands.Choice[str]]:
     """Autocomplete for address scope (external/internal)."""
-    scopes = ["external", "internal"]
-    filtered = [s for s in scopes if s.startswith(current.lower())]
+    scopes = [
+        app_commands.Choice(name="external (외부/기본)", value="external"),
+        app_commands.Choice(name="internal (내부)", value="internal"),
+    ]
+    
+    if not current:
+        return scopes
+    
+    current_lower = current.lower()
     return [
-        app_commands.Choice(name=scope, value=scope)
-        for scope in filtered
+        s for s in scopes 
+        if s.name.lower().startswith(current_lower) or s.value.lower().startswith(current_lower)
     ]
 
 
@@ -93,11 +134,18 @@ async def whitelist_action_autocomplete(
     current: str,
 ) -> list[app_commands.Choice[str]]:
     """Autocomplete for whitelist action (add/remove)."""
-    actions = ["add", "remove"]
-    filtered = [a for a in actions if a.startswith(current.lower())]
+    actions = [
+        app_commands.Choice(name="add (추가)", value="add"),
+        app_commands.Choice(name="remove (제거)", value="remove"),
+    ]
+    
+    if not current:
+        return actions
+    
+    current_lower = current.lower()
     return [
-        app_commands.Choice(name=action, value=action)
-        for action in filtered
+        a for a in actions 
+        if a.name.lower().startswith(current_lower) or a.value.lower().startswith(current_lower)
     ]
 
 

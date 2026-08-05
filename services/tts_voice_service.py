@@ -11,12 +11,43 @@ log = get_logger(__name__)
 DEFAULT_VOICE = "default"
 DEFAULT_LANGUAGE = "en"
 
+# Available voices for different languages
+AVAILABLE_VOICES = {
+    "en": [
+        "en-US-GuyNeural",
+        "en-US-AriaNeural",
+        "en-GB-RyanNeural",
+        "en-AU-WilliamNeural",
+        "en-CA-ClaudeNeural",
+    ],
+    "ko": [
+        "ko-KR-SunHiNeural",
+        "ko-KR-InJoonNeural",
+        "ko-KR-BongJinNeural",
+    ],
+    "default": ["default"],
+}
+
 
 class TTSVoiceService:
     """Handles TTS voice-setting business rules."""
 
     def __init__(self, repository: TTSVoiceRepository) -> None:
         self._repository = repository
+
+    def list_voices(self) -> list[str]:
+        """Return all available voice IDs.
+        
+        Returns:
+            List of voice identifiers including language-specific and default.
+        """
+        voices = []
+        # Add default first
+        voices.extend(AVAILABLE_VOICES.get("default", []))
+        # Then add language-specific voices
+        for lang in ["en", "ko"]:
+            voices.extend(AVAILABLE_VOICES.get(lang, []))
+        return voices
 
     async def set_voice(self, discord_id: int, voice_id: str) -> TTSVoiceSetting:
         """Persist the TTS voice preference for a user.

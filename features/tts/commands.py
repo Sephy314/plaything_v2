@@ -18,16 +18,33 @@ async def voice_autocomplete(
     interaction: discord.Interaction,
     current: str,
 ) -> list[app_commands.Choice[str]]:
-    """Autocomplete for voice ID parameter."""
+    """Autocomplete for voice ID parameter with language-specific voices."""
     try:
         from core.container import container
         voices = container.tts_voice_service.list_voices()
+        
+        # Filter voices by current input
         filtered = [v for v in voices if v.lower().startswith(current.lower())]
-        return [
-            app_commands.Choice(name=voice, value=voice)
-            for voice in filtered[:25]
-        ]
-    except Exception:
+        
+        # Create choices with language indicators
+        choices = []
+        for voice in filtered[:25]:
+            # Add language indicator to display name
+            lang_indicator = ""
+            if voice.startswith("ko"):
+                lang_indicator = " 🇰🇷"
+            elif voice.startswith("en"):
+                lang_indicator = " 🇺🇸"
+            
+            choices.append(
+                app_commands.Choice(
+                    name=f"{voice}{lang_indicator}",
+                    value=voice,
+                )
+            )
+        return choices
+    except Exception as e:
+        log.debug("voice_autocomplete error: %s", e)
         return []
 
 
