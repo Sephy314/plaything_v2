@@ -12,6 +12,7 @@ Discord 봇 기반(Foundation) 프로젝트. 기존 plaything을 갈아엎고 �
 - Voice Manager + Audio Manager 인터페이스 설계
 - Minecraft / Music / TTS / 급식 Feature 명령 골격
 - **Minecraft 서버 관리 (생성/실행/종료/RCON/UUID/화이트리스트/자동종료)**
+- **YouTube 음악 재생 (영상/플레이리스트/루프/스킵 지원)**
 
 ## 기술 스택
 
@@ -138,3 +139,36 @@ Repository는 SQL만 수행한다. 비즈니스 로직은 Service가 담당한�
 - `!마크 생성`은 폴더 생성 → 기본 파일(server.properties/eula/whitelist/ops) 작성 → DB Insert를 원자적으로 수행하며, 실패 시 폴더를 삭제하고 롤백한다. `white-list=true`, RCON이 기본 활성화된다.
 - `!마크 명령어`는 Discord 권한이 아닌 **서버 ops.json 기준 OP 여부**로 검증한다.
 - 실행 중인 서버는 주기적으로 `list`를 조회해 `minecraft_sessions`에 플레이어 수를 기록하고, 0명이 지속되면 자동 종료 타이머가 동작한다(플레이어 입장 시 타이머 해제).
+
+## YouTube 음악 재생 명령어
+
+모든 명령어는 prefix `!`로 사용한다.
+
+```text
+!재생해 <URL> [계속]         YouTube 영상/플레이리스트 재생
+!스킵                      다음 곡으로 이동
+!나가                      재생 중지 및 음성 채널 퇴장
+!재생정보                   현재 재생 상태 조회
+```
+
+지원하는 URL:
+- 개별 영상: `https://www.youtube.com/watch?v=xxxxx`
+- 플레이리스트: `https://www.youtube.com/playlist?list=xxxxx`
+
+사용 예:
+```text
+!재생해 https://www.youtube.com/watch?v=dQw4w9WgXcQ
+!재생해 https://www.youtube.com/playlist?list=PL1234567890 계속
+!스킵
+!나가
+!재생정보
+```
+
+동작 요약:
+
+- 사용자가 음성 채널에 있어야 명령어 실행 가능 (없으면 에러)
+- 각 서버(guild)별로 독립적인 Queue 관리 (한 서버의 재생이 다른 서버에 영향 없음)
+- `계속` 파라미터로 Loop 모드 활성화 (현재 곡 반복 재생)
+- YouTube 영상/플레이리스트는 yt-dlp로 추출되며, FFmpeg 스트림으로 재생
+- TTS와 동시 사용 가능 (스피커가 말하는 동안에도 음악 재생됨)
+- 에러 발생 시 LOG_CHANNEL_ID로 설정된 채널에 로그 전송
