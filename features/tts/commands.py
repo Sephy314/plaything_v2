@@ -28,7 +28,10 @@ class TtsCog(FeatureCog):
     @group(name="TTS", invoke_without_command=True, help="TTS 음성 기능")
     async def tts_group(self, ctx: Context) -> None:
         """Show TTS usage."""
-        await ctx.send("`!TTS 입장` — 현재 음성 채널에 입장 후 메시지를 읽습니다.")
+        await ctx.send(
+            "`!TTS 입장` — 현재 음성 채널에 입장 후 메시지를 읽습니다.\n"
+            "`!TTS 나가기` — 음성 채널에서 나갑니다."
+        )
 
     @tts_group.command(name="입장", help="음성 채널에 입장하고 메시지를 읽기 시작합니다.")
     async def tts_join(self, ctx: Context) -> None:
@@ -44,6 +47,16 @@ class TtsCog(FeatureCog):
             return
         self._service.enable_channel(ctx.guild.id, ctx.channel.id)
         await ctx.send(f"TTS가 활성화되었습니다. <#{ctx.channel.id}> 채널의 메시지를 읽습니다.")
+
+    @tts_group.command(name="나가기", help="음성 채널에서 나갑니다.")
+    async def tts_leave(self, ctx: Context) -> None:
+        """Leave the voice channel and disable TTS."""
+        try:
+            await self._service.leave(ctx)
+        except VoiceException as exc:
+            await ctx.send(f"음성 채널 퇴장에 실패했습니다: {exc}")
+            return
+        await ctx.send("음성 채널에서 나갔습니다. TTS가 비활성화되었습니다.")
 
     # ------------------------------------------------------------------
     # Voice preference

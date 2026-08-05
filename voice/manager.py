@@ -80,12 +80,22 @@ class VoiceManager:
             before: VoiceState,
             after: VoiceState,
         ) -> None:
-            if member.id != self._bot.user.id:
+            # Clean up if the bot disconnects
+            if member.id == self._bot.user.id:
+                if before.channel and not after.channel:
+                    await self._drop(self._connection_for_guild_id(after.guild.id))
                 return
-            if not before.channel and after.channel:
-                return
-            if before.channel and not after.channel:
-                await self._drop(self._connection_for_guild_id(after.guild.id))
+            
+            # Auto-leave if no users remain in the bot's voice channel
+            guild_id = after.guild.id
+            connection = self._connection_for_guild_id(guild_id)
+            if connection and connection.voice_client and connection.voice_client.channel:
+                channel = connection.voice_client.channel
+                # Count non-bot members in the channel
+                non_bot_members = [m for m in channel.members if not m.bot]
+                if not non_bot_members:
+                    log.info("Auto-leaving voice channel (no users) in guild %s", guild_id)
+                    await self._drop(connection)
 
     def _connection_for_guild_id(self, guild_id: int) -> GuildConnection | None:
         return self._connections.get(guild_id)
