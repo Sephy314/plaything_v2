@@ -7,8 +7,11 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Minecraft 26.1+ requires Java 25.
+# FFmpeg is required for voice processing
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openjdk-25-jre-headless \
+    && apt-get install -y --no-install-recommends \
+       openjdk-25-jre-headless \
+       ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml alembic.ini ./
