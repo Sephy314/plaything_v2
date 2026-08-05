@@ -5,37 +5,43 @@ Real audio playback is implemented in a later stage.
 
 from __future__ import annotations
 
-from discord.ext.commands import Bot, Context, command
+from discord import app_commands
+from discord.ext.commands import Bot
 
 from core.container import get_container
 from features.base import FeatureCog
 
 
 class MusicCog(FeatureCog):
-    """Prefix commands for music playback."""
+    """Slash commands for music playback."""
 
     def __init__(self, bot: Bot) -> None:
         super().__init__(bot)
 
-    @command(name="play", help="Play music in voice.")
-    async def play(self, ctx: Context, *, query: str) -> None:
+    @app_commands.command(name="play", description="음악을 재생합니다.")
+    @app_commands.describe(query="검색어 또는 URL")
+    async def play(self, interaction, query: str) -> None:
         """Play the requested track."""
-        await self._not_implemented(ctx)
+        await interaction.response.defer()
+        await self._not_implemented(interaction)
 
-    @command(name="skip", help="Skip the current track.")
-    async def skip(self, ctx: Context) -> None:
+    @app_commands.command(name="skip", description="현재 곡을 스킵합니다.")
+    async def skip(self, interaction) -> None:
         """Skip the currently playing track."""
-        await self._not_implemented(ctx)
+        await interaction.response.defer()
+        await self._not_implemented(interaction)
 
-    @command(name="stop", help="Stop playback and leave voice.")
-    async def stop(self, ctx: Context) -> None:
+    @app_commands.command(name="stop", description="재생을 중지하고 음성 채널을 나갑니다.")
+    async def stop(self, interaction) -> None:
         """Stop playback and leave the voice channel."""
-        await self._not_implemented(ctx)
+        await interaction.response.defer()
+        await self._not_implemented(interaction)
 
-    @command(name="queue", help="Show the current queue.")
-    async def queue(self, ctx: Context) -> None:
+    @app_commands.command(name="queue", description="현재 재생 목록을 표시합니다.")
+    async def queue(self, interaction) -> None:
         """Display the current playback queue."""
-        await self._not_implemented(ctx)
+        await interaction.response.defer()
+        await self._not_implemented(interaction)
 
 
 async def setup(bot: Bot) -> None:

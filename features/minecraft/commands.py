@@ -1,4 +1,4 @@
-"""Minecraft feature commands — prefix-command group ``!마크``.
+"""Minecraft feature commands — slash command group ``/마크``.
 
 Provides full server lifecycle management: creation, start/stop, player
 inspection, RCON commands (OP-gated), UUID registration (admin-only),
@@ -10,10 +10,11 @@ RCON execution is gated behind Minecraft in-game OP permission instead.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import discord
-from discord.ext.commands import Bot, Context, group
+from discord import app_commands
+from discord.ext.commands import Bot
 
 from core.exceptions import (
     MinecraftAliasExists,
@@ -31,53 +32,103 @@ from services.minecraft_service import MinecraftService
 
 log = get_logger(__name__)
 
-USAGE = (
-    "`!마크 생성 <맵이름> [포트]`\n"
-    "`!마크 켜 <맵이름>`\n"
-    "`!마크 꺼 <맵이름>`\n"
-    "`!마크 유저확인 <맵이름>`\n"
-    "`!마크 주소 <맵이름>`\n"
-    "`!마크 명령어 <맵이름> <명령어>`\n"
-    "`!마크 상태 <맵이름>`\n"
-    "`!마크 서버`\n"
-    "`!마크 로그 <맵이름>`\n"
-    "`!마크 화이트리스트 추가/제거 <맵이름> <닉네임>`\n"
-    "`!마크 UUID등록 <유저> <Minecraft UUID>` (관리자)"
-)
+
+# ------------------------------------------------------------------
+# Autocomplete callbacks (module-level)
+# ------------------------------------------------------------------
+
+
+async def server_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for server alias parameter."""
+    try:
+        from core.container import container
+        servers = await container.minecraft_service.list_servers()
+        aliases = [s.alias for s in servers]
+        filtered = [a for a in aliases if a.lower().startswith(current.lower())]
+        return [
+            app_commands.Choice(name=alias, value=alias)
+            for alias in filtered[:25]
+        ]
+    except Exception:
+        return []
+
+
+async def server_running_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for running server aliases only."""
+    try:
+        from core.container import container
+        from features.minecraft.models import STATUS_RUNNING
+        servers = await container.minecraft_service.list_servers()
+        running = [s.alias for s in servers if s.status == STATUS_RUNNING]
+        filtered = [a for a in running if a.lower().startswith(current.lower())]
+        return [
+            app_commands.Choice(name=alias, value=alias)
+            for alias in filtered[:25]
+        ]
+    except Exception:
+        return []
+
+
+async def scope_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for address scope (external/internal)."""
+    scopes = ["external", "internal"]
+    filtered = [s for s in scopes if s.startswith(current.lower())]
+    return [
+        app_commands.Choice(name=scope, value=scope)
+        for scope in filtered
+    ]
+
+
+async def whitelist_action_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for whitelist action (add/remove)."""
+    actions = ["add", "remove"]
+    filtered = [a for a in actions if a.startswith(current.lower())]
+    return [
+        app_commands.Choice(name=action, value=action)
+        for action in filtered
+    ]
 
 
 class MinecraftCog(FeatureCog):
-    """Prefix commands for Minecraft server management."""
+    """Slash commands for Minecraft server management."""
 
     def __init__(self, bot: Bot, service: MinecraftService) -> None:
         super().__init__(bot)
         self._service = service
 
     # ------------------------------------------------------------------
-    # Group root
-    # ------------------------------------------------------------------
-
-    @group(name="마크", invoke_without_command=True, help="Minecraft 서버 관리 명령어 그룹")
-    async def minecraft(self, ctx: Context) -> None:
-        """Show the available subcommands when no subcommand is given."""
-        await ctx.send(USAGE)
-
-    # ------------------------------------------------------------------
     # Server creation
     # ------------------------------------------------------------------
 
-    @minecraft.command(name="생성", help="Minecraft 서버를 생성합니다.")
-    async def mc_create(self, ctx: Context, alias: str, port: int = None) -> None:
+    @app_commands.command(name="마크_생성", description="Minecraft 서버를 생성합니다.")
+    @app_commands.describe(alias="서버 별명", port="포트 번호 (선택사항)")
+    @app_commands.default_permissions(administrator=True)
+    async def mc_create(
+        self,
+        interaction: discord.Interaction,
+        alias: str,
+        port: int | None = None,
+    ) -> None:
         """Create a new Minecraft server with the given alias."""
-        if not self._is_admin(ctx):
-            await ctx.send("관리자 권한이 필요합니다.")
-            return
+        await interaction.response.defer()
         try:
-            server = await self._service.register_server(alias.strip(), port, ctx.author.id)
+            server = await self._service.register_server(alias.strip(), port, interaction.user.id)
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
-        await ctx.send(
+        await interaction.followup.send(
             f"서버 생성 완료: **{server.alias}** (포트 {server.port}, 폴더 `{server.folder_path}`)"
         )
 
@@ -85,173 +136,218 @@ class MinecraftCog(FeatureCog):
     # Start / stop
     # ------------------------------------------------------------------
 
-    @minecraft.command(name="켜", help="Minecraft 서버를 시작합니다.")
-    async def mc_start(self, ctx: Context, alias: str) -> None:
+    @app_commands.command(name="마크_켜", description="Minecraft 서버를 시작합니다.")
+    @app_commands.describe(alias="서버 별명")
+    @app_commands.autocomplete(alias=server_autocomplete)
+    async def mc_start(self, interaction: discord.Interaction, alias: str) -> None:
         """Start the named server."""
+        await interaction.response.defer()
         try:
             server = await self._service.start(alias.strip())
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
-        await ctx.send(f"서버 시작: **{server.alias}** (포트 {server.port})")
+        await interaction.followup.send(f"서버 시작: **{server.alias}** (포트 {server.port})")
 
-    @minecraft.command(name="꺼", help="Minecraft 서버를 종료합니다.")
-    async def mc_stop(self, ctx: Context, alias: str) -> None:
+    @app_commands.command(name="마크_꺼", description="Minecraft 서버를 종료합니다.")
+    @app_commands.describe(alias="서버 별명")
+    @app_commands.autocomplete(alias=server_running_autocomplete)
+    async def mc_stop(self, interaction: discord.Interaction, alias: str) -> None:
         """Stop the named server."""
+        await interaction.response.defer()
         try:
             server = await self._service.stop(alias.strip())
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
-        await ctx.send(f"서버 종료: **{server.alias}**")
+        await interaction.followup.send(f"서버 종료: **{server.alias}**")
 
     # ------------------------------------------------------------------
     # Player / status
     # ------------------------------------------------------------------
 
-    @minecraft.command(name="주소", help="서버 접속 주소를 출력합니다. [외부/내부, 기본 외부]")
-    async def mc_address(self, ctx: Context, alias: str, scope: str = "외부") -> None:
+    @app_commands.command(name="마크_주소", description="서버 접속 주소를 출력합니다.")
+    @app_commands.describe(
+        alias="서버 별명",
+        scope="external (외부/기본) 또는 internal (내부)",
+    )
+    @app_commands.autocomplete(alias=server_autocomplete)
+    @app_commands.autocomplete(scope=scope_autocomplete)
+    async def mc_address(
+        self,
+        interaction: discord.Interaction,
+        alias: str,
+        scope: str = "external",
+    ) -> None:
         """Show the ``host:port`` connection address for the named server.
 
         Args:
             alias: The server alias.
-            scope: ``외부`` (not same router, default) or ``내부`` (same router).
+            scope: ``external`` (not same router, default) or ``internal`` (same router).
         """
-        if scope not in ("외부", "내부"):
-            await ctx.send("범위는 `외부` 또는 `내부`만 가능합니다. 예: `!마크 주소 survival 내부`")
+        await interaction.response.defer()
+        if scope not in ("external", "internal"):
+            await interaction.followup.send(
+                "범위는 `external` 또는 `internal`만 가능합니다."
+            )
             return
-        internal = scope == "내부"
+        internal = scope == "internal"
         try:
             address = await self._service.get_address(alias.strip(), internal=internal)
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
         label = "내부(같은 공유기)" if internal else "외부(공유기 밖)"
-        await ctx.send(f"**{alias}** ({label}) 접속 주소: `{address}`")
+        await interaction.followup.send(f"**{alias}** ({label}) 접속 주소: `{address}`")
 
-    @minecraft.command(name="유저확인", help="현재 접속 중인 플레이어를 확인합니다.")
-    async def mc_players(self, ctx: Context, alias: str) -> None:
+    @app_commands.command(name="마크_유저확인", description="현재 접속 중인 플레이어를 확인합니다.")
+    @app_commands.describe(alias="서버 별명")
+    @app_commands.autocomplete(alias=server_running_autocomplete)
+    async def mc_players(self, interaction: discord.Interaction, alias: str) -> None:
         """List the players currently online on the named server."""
+        await interaction.response.defer()
         try:
             names, count = await self._service.get_players(alias.strip())
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
         body = "\n".join(f"- {name}" for name in names) or "(없음)"
-        await ctx.send(f"접속자 {count}명:\n{body}")
+        await interaction.followup.send(f"접속자 {count}명:\n{body}")
 
-    @minecraft.command(name="상태", help="서버 상태를 확인합니다.")
-    async def mc_status(self, ctx: Context, alias: str) -> None:
+    @app_commands.command(name="마크_상태", description="서버 상태를 확인합니다.")
+    @app_commands.describe(alias="서버 별명")
+    @app_commands.autocomplete(alias=server_autocomplete)
+    async def mc_status(self, interaction: discord.Interaction, alias: str) -> None:
         """Show a concise runtime status snapshot for the named server."""
+        await interaction.response.defer()
         try:
             info = await self._service.status(alias.strip())
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
-        await ctx.send(self._format_status(info))
+        await interaction.followup.send(self._format_status(info))
 
-    @minecraft.command(name="서버", help="모든 서버의 목록을 표시합니다.")
-    async def mc_list_servers(self, ctx: Context) -> None:
+    @app_commands.command(name="마크_서버", description="모든 서버의 목록을 표시합니다.")
+    async def mc_list_servers(self, interaction: discord.Interaction) -> None:
         """List all managed Minecraft servers with their status."""
+        await interaction.response.defer()
         try:
             servers = await self._service.list_servers()
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
-        
+
         if not servers:
-            await ctx.send("등록된 서버가 없습니다. `!마크 생성`으로 만들어 주세요.")
+            await interaction.followup.send("등록된 서버가 없습니다. `/마크_생성`으로 만들어 주세요.")
             return
-        
+
+        from features.minecraft.models import STATUS_RUNNING
         lines = ["**등록된 서버 목록:**\n"]
         for server in servers:
-            from features.minecraft.models import STATUS_RUNNING
             status_icon = "🟢" if server.status == STATUS_RUNNING else "🔴"
             lines.append(f"{status_icon} **{server.alias}** (포트 {server.port})")
-        
-        await ctx.send("\n".join(lines))
 
-    @minecraft.command(name="로그", help="서버의 최근 로그를 표시합니다.")
-    async def mc_logs(self, ctx: Context, alias: str) -> None:
+        await interaction.followup.send("\n".join(lines))
+
+    @app_commands.command(name="마크_로그", description="서버의 최근 로그를 표시합니다.")
+    @app_commands.describe(alias="서버 별명")
+    @app_commands.autocomplete(alias=server_autocomplete)
+    async def mc_logs(self, interaction: discord.Interaction, alias: str) -> None:
         """Show the last 50 lines of the named server's latest.log file."""
+        await interaction.response.defer()
         try:
             logs = await self._service.read_logs(alias.strip())
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
-        
-        await ctx.send(f"**{alias}** 최근 로그:\n```\n{logs}\n```")
+
+        await interaction.followup.send(f"**{alias}** 최근 로그:\n```\n{logs}\n```")
 
     # ------------------------------------------------------------------
     # RCON
     # ------------------------------------------------------------------
 
-    @minecraft.command(name="명령어", help="서버에 RCON 명령어를 실행합니다. (OP 권한 필요)")
-    async def mc_command(self, ctx: Context, alias: str, *, command: str) -> None:
+    @app_commands.command(name="마크_명령어", description="서버에 RCON 명령어를 실행합니다. (OP 권한 필요)")
+    @app_commands.describe(alias="서버 별명", command="실행할 명령어")
+    @app_commands.autocomplete(alias=server_running_autocomplete)
+    async def mc_command(
+        self,
+        interaction: discord.Interaction,
+        alias: str,
+        command: str,
+    ) -> None:
         """Run an RCON command, gated by in-game OP permission."""
+        await interaction.response.defer()
         try:
-            output = await self._service.execute_command(alias.strip(), command, ctx.author.id)
+            output = await self._service.execute_command(
+                alias.strip(), command, interaction.user.id
+            )
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
-        await ctx.send(f"`{command}` 실행 결과:\n```{output[:1500] or '(결과 없음)'}```")
+        await interaction.followup.send(
+            f"`{command}` 실행 결과:\n```{output[:1500] or '(결과 없음)'}```"
+        )
 
     # ------------------------------------------------------------------
     # UUID registration (admin-only)
     # ------------------------------------------------------------------
 
-    @minecraft.command(name="UUID등록", help="Discord 유저와 Minecraft UUID를 연결합니다. (관리자)")
-    async def mc_uuid(self, ctx: Context, target: discord.Member, minecraft_uuid: str) -> None:
+    @app_commands.command(
+        name="마크_uuid등록",
+        description="Discord 유저와 Minecraft UUID를 연결합니다. (관리자)",
+    )
+    @app_commands.describe(target="대상 유저", minecraft_uuid="Minecraft UUID")
+    @app_commands.default_permissions(administrator=True)
+    async def mc_uuid(
+        self,
+        interaction: discord.Interaction,
+        target: discord.User,
+        minecraft_uuid: str,
+    ) -> None:
         """Persist the Discord↔Minecraft UUID mapping for a member."""
-        if not self._is_admin(ctx):
-            await ctx.send("관리자 권한이 필요합니다.")
-            return
+        await interaction.response.defer()
         try:
             user = await self._service.register_uuid(target.id, minecraft_uuid.strip())
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
-        await ctx.send(f"UUID 등록 완료: <@{user.discord_id}> → `{user.minecraft_uuid}`")
+        await interaction.followup.send(
+            f"UUID 등록 완료: <@{user.discord_id}> → `{user.minecraft_uuid}`"
+        )
 
     # ------------------------------------------------------------------
     # Whitelist
     # ------------------------------------------------------------------
 
-    @minecraft.group(name="화이트리스트", invoke_without_command=True, help="화이트리스트 관리")
-    async def mc_whitelist(self, ctx: Context) -> None:
-        """Show usage when the whitelist group is invoked without a subcommand."""
-        await ctx.send("`!마크 화이트리스트 추가/제거 <맵이름> <닉네임>`")
-
-    @mc_whitelist.command(name="추가", help="화이트리스트에 플레이어를 추가합니다.")
-    async def wl_add(self, ctx: Context, alias: str, nickname: str) -> None:
-        """Add a nickname to the server's whitelist."""
-        await self._wl_action(ctx, alias, "add", nickname)
-
-    @mc_whitelist.command(name="제거", help="화이트리스트에서 플레이어를 제거합니다.")
-    async def wl_remove(self, ctx: Context, alias: str, nickname: str) -> None:
-        """Remove a nickname from the server's whitelist."""
-        await self._wl_action(ctx, alias, "remove", nickname)
-
-    async def _wl_action(self, ctx: Context, alias: str, action: str, nickname: str) -> None:
+    @app_commands.command(name="마크_화이트리스트", description="화이트리스트를 관리합니다.")
+    @app_commands.describe(
+        alias="서버 별명",
+        action="add (추가) 또는 remove (제거)",
+        nickname="플레이어 닉네임",
+    )
+    @app_commands.autocomplete(alias=server_autocomplete)
+    @app_commands.autocomplete(action=whitelist_action_autocomplete)
+    async def mc_whitelist(
+        self,
+        interaction: discord.Interaction,
+        alias: str,
+        action: Literal["add", "remove"],
+        nickname: str,
+    ) -> None:
+        """Add or remove a nickname from the server's whitelist."""
+        await interaction.response.defer()
         try:
             output = await self._service.whitelist(alias.strip(), action, nickname.strip())
         except Exception as exc:
-            await self._handle_error(ctx, exc)
+            await self._handle_error(interaction, exc)
             return
         verb = "추가" if action == "add" else "제거"
-        await ctx.send(f"화이트리스트 {verb} 완료: **{nickname}**\n```{output[:500]}```")
+        await interaction.followup.send(f"화이트리스트 {verb} 완료: **{nickname}**\n```{output[:500]}```")
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _is_admin(ctx: Context) -> bool:
-        if ctx.guild is None:
-            return False
-        if ctx.author == ctx.guild.owner:
-            return True
-        return bool(ctx.author.guild_permissions.administrator)
 
     @staticmethod
     def _format_status(info: dict[str, Any]) -> str:
@@ -262,11 +358,13 @@ class MinecraftCog(FeatureCog):
             f"접속자: {info['player_count']}명 ({', '.join(info['online_players']) or '없음'})"
         )
 
-    async def _handle_error(self, ctx: Context, exc: Exception) -> None:
+    async def _handle_error(
+        self, interaction: discord.Interaction, exc: Exception
+    ) -> None:
         """Reply with a friendly, specific message for the exception type."""
         message = {
             MinecraftServerNotFound: "서버를 찾을 수 없습니다. "
-            "먼저 `!마크 생성`으로 만들어 주세요.",
+            "먼저 `/마크_생성`으로 만들어 주세요.",
             MinecraftAliasExists: "이미 같은 이름의 서버가 존재합니다.",
             MinecraftFolderError: "서버 폴더를 준비하지 못했습니다.",
             MinecraftProcessError: "서버 프로세스 작업에 실패했습니다.",
@@ -276,20 +374,21 @@ class MinecraftCog(FeatureCog):
         }
         if isinstance(exc, MinecraftPortConflict):
             log.warning("minecraft command rejected: %s", exc)
-            await ctx.send(f"⚠️ {exc}")
+            await interaction.followup.send(f"⚠️ {exc}")
             return
         # Most-specific match first
         for exc_type, text in message.items():
             if isinstance(exc, exc_type):
                 log.warning("minecraft command rejected: %s", exc)
-                await ctx.send(text)
+                await interaction.followup.send(text)
                 return
         log.error("minecraft command error: %s", exc, exc_info=exc)
-        await ctx.send(f"오류가 발생했습니다: {exc}")
+        await interaction.followup.send(f"오류가 발생했습니다: {exc}")
 
 
 async def setup(bot: Bot) -> None:
     """Register the cog with the bot."""
     from core.container import container
 
-    await bot.add_cog(MinecraftCog(bot, container.minecraft_service))
+    cog = MinecraftCog(bot, container.minecraft_service)
+    await bot.add_cog(cog)

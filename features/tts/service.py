@@ -132,4 +132,8 @@ class TtsFeatureService:
 
     @staticmethod
     def _resolve_user_id(ctx) -> int:
-        return int(ctx.author.id)
+        # Support both Context (ctx.author) and Interaction (ctx.user)
+        user = getattr(ctx, "author", None) or getattr(ctx, "user", None)
+        if user is None:
+            raise VoiceException("유저 정보를 가져올 수 없습니다.")
+        return int(user.id)

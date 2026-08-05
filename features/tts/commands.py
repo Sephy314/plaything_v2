@@ -1,9 +1,10 @@
-"""TTS feature commands — voice join and message-to-speech."""
+"""TTS feature commands — slash commands for voice join and message-to-speech."""
 
 from __future__ import annotations
 
 import discord
-from discord.ext.commands import Bot, Context, group
+from discord import app_commands
+from discord.ext.commands import Bot
 
 from core.exceptions import VoiceException
 from core.logger import get_logger
@@ -13,8 +14,25 @@ from features.tts.service import TtsFeatureService
 log = get_logger(__name__)
 
 
+async def voice_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for voice ID parameter."""
+    try:
+        from core.container import container
+        voices = container.tts_voice_service.list_voices()
+        filtered = [v for v in voices if v.lower().startswith(current.lower())]
+        return [
+            app_commands.Choice(name=voice, value=voice)
+            for voice in filtered[:25]
+        ]
+    except Exception:
+        return []
+
+
 class TtsCog(FeatureCog):
-    """Prefix commands for text-to-speech playback."""
+    """Slash commands for text-to-speech playback."""
 
     def __init__(self, bot: Bot, service: TtsFeatureService) -> None:
         super().__init__(bot)
@@ -25,52 +43,51 @@ class TtsCog(FeatureCog):
     # Voice join
     # ------------------------------------------------------------------
 
-    @group(name="TTS", invoke_without_command=True, help="TTS 음성 기능")
-    async def tts_group(self, ctx: Context) -> None:
-        """Show TTS usage."""
-        await ctx.send(
-            "`!TTS 입장` — 현재 음성 채널에 입장 후 메시지를 읽습니다.\n"
-            "`!TTS 나가기` — 음성 채널에서 나갑니다."
+    @app_commands.command(name="tts_입장", description="음성 채널에 입장하고 메시지를 읽기 시작합니다.")
+    async def tts_join(self, interaction: discord.Interaction) -> None:
+        """Join the caller's voice channel and start reading messages."""
+        await interaction.response.defer()
+        voice_channel = getattr(interaction.user.voice, "channel", None)
+        if voice_channel is None:
+            await interaction.followup.send("먼저 음성 채널에 들어가 있어야 합니다.")
+            return
+        try:
+            await self._service.join(interaction, voice_channel)
+        except VoiceException as exc:
+            await interaction.followup.send(f"음성 채널 입장에 실패했습니다: {exc}")
+            return
+        self._service.enable_channel(interaction.guild.id, interaction.channel.id)
+        await interaction.followup.send(
+            f"TTS가 활성화되었습니다. <#{interaction.channel.id}> 채널의 메시지를 읽습니다."
         )
 
-    @tts_group.command(name="입장", help="음성 채널에 입장하고 메시지를 읽기 시작합니다.")
-    async def tts_join(self, ctx: Context) -> None:
-        """Join the caller's voice channel and start reading messages."""
-        voice_channel = getattr(ctx.author.voice, "channel", None)
-        if voice_channel is None:
-            await ctx.send("먼저 음성 채널에 들어가 있어야 합니다.")
-            return
-        try:
-            await self._service.join(ctx, voice_channel)
-        except VoiceException as exc:
-            await ctx.send(f"음성 채널 입장에 실패했습니다: {exc}")
-            return
-        self._service.enable_channel(ctx.guild.id, ctx.channel.id)
-        await ctx.send(f"TTS가 활성화되었습니다. <#{ctx.channel.id}> 채널의 메시지를 읽습니다.")
-
-    @tts_group.command(name="나가기", help="음성 채널에서 나갑니다.")
-    async def tts_leave(self, ctx: Context) -> None:
+    @app_commands.command(name="tts_나가기", description="음성 채널에서 나갑니다.")
+    async def tts_leave(self, interaction: discord.Interaction) -> None:
         """Leave the voice channel and disable TTS."""
+        await interaction.response.defer()
         try:
-            await self._service.leave(ctx)
+            await self._service.leave(interaction)
         except VoiceException as exc:
-            await ctx.send(f"음성 채널 퇴장에 실패했습니다: {exc}")
+            await interaction.followup.send(f"음성 채널 퇴장에 실패했습니다: {exc}")
             return
-        await ctx.send("음성 채널에서 나갔습니다. TTS가 비활성화되었습니다.")
+        await interaction.followup.send("음성 채널에서 나갔습니다. TTS가 비활성화되었습니다.")
 
     # ------------------------------------------------------------------
     # Voice preference
     # ------------------------------------------------------------------
 
-    @group(name="voice", invoke_without_command=True, help="TTS 음성 목소리 설정")
-    async def voice_group(self, ctx: Context, voice_id: str) -> None:
+    @app_commands.command(name="voice", description="TTS 음성 목소리를 설정합니다.")
+    @app_commands.describe(voice_id="목소리 ID")
+    @app_commands.autocomplete(voice_id=voice_autocomplete)
+    async def voice_set(self, interaction: discord.Interaction, voice_id: str) -> None:
         """Set the caller's TTS voice preference."""
+        await interaction.response.defer()
         try:
-            setting = await self._service.set_voice(ctx, voice_id)
+            setting = await self._service.set_voice(interaction, voice_id)
         except ValueError as exc:
-            await ctx.send(f"음성 설정에 실패했습니다: {exc}")
+            await interaction.followup.send(f"음성 설정에 실패했습니다: {exc}")
             return
-        await ctx.send(f"음성 목소리를 설정했습니다: `{setting.voice_id}`")
+        await interaction.followup.send(f"음성 목소리를 설정했습니다: `{setting.voice_id}`")
 
     # ------------------------------------------------------------------
     # Message listener (auto-read)
@@ -100,6 +117,7 @@ async def setup(bot: Bot) -> None:
     service = TtsFeatureService(
         container.voice_manager,
         container.tts_voice_service,
-        prefix=container.settings.bot_prefix if hasattr(container.settings, "bot_prefix") else "!",
+        prefix=container.settings.bot_prefix if hasattr(container.settings, "bot_prefix") else "/",
     )
-    await bot.add_cog(TtsCog(bot, service))
+    cog = TtsCog(bot, service)
+    await bot.add_cog(cog)

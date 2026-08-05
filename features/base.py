@@ -24,6 +24,12 @@ class FeatureCog(commands.Cog):
         self.bot = bot
         self.log = get_logger(type(self).__name__)
 
-    async def _not_implemented(self, ctx: commands.Context) -> None:
+    async def _not_implemented(self, ctx) -> None:
         """Reply with the standard 'not implemented' message."""
-        await ctx.send(NOT_IMPLEMENTED_MESSAGE)
+        # Support both Context and Interaction
+        if hasattr(ctx, "followup"):
+            # Interaction
+            await ctx.followup.send(NOT_IMPLEMENTED_MESSAGE)
+        else:
+            # Context
+            await ctx.send(NOT_IMPLEMENTED_MESSAGE)
