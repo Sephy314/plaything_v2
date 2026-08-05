@@ -769,15 +769,16 @@ class MinecraftService:
     async def _rcon_exec(self, server: MinecraftServer, command: str) -> str:
         host = self._settings.mc_rcon_host
         port, password = self._rcon_connection_details(server)
-        client = RCONClient(host, port)
         
         # Retry logic for RCON connections (server may still be initializing)
         max_retries = 3
         last_error = None
         for attempt in range(max_retries):
+            client = RCONClient(host, port)
             try:
                 await client.connect(password, timeout=30.0)
                 result = await client.command(command, timeout=30.0)
+                await client.close()
                 return result
             except RCONError as exc:
                 last_error = exc
@@ -785,9 +786,6 @@ class MinecraftService:
                 if attempt < max_retries - 1:
                     # Wait before retrying (exponential backoff)
                     await asyncio.sleep(2 ** attempt)
-                    client = RCONClient(host, port)
-            finally:
-                await client.close()
         
         raise MinecraftRconError(f"RCON failed for '{server.alias}': {last_error}") from last_error
 
