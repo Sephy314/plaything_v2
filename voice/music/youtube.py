@@ -32,10 +32,10 @@ class YoutubeClient:
         self._options = {**_DEFAULT_OPTIONS, **(options or {})}
 
     async def extract(self, url: str) -> list[Track]:
-        """Resolve a URL into a list of playable tracks.
+        """Resolve a URL or search query into a list of playable tracks.
 
         Args:
-            url: A YouTube video or playlist URL.
+            url: A YouTube video, playlist URL, or search query.
 
         Returns:
             A non-empty list of :class:`Track` items.
@@ -45,9 +45,15 @@ class YoutubeClient:
         """
         if not url or not url.strip():
             raise YoutubeError("Empty YouTube URL")
+        
+        url_stripped = url.strip()
+        # Automatically convert search terms to ytsearch query
+        if not (url_stripped.startswith("http://") or url_stripped.startswith("https://") or url_stripped.startswith("ytsearch:")):
+            url_stripped = f"ytsearch1:{url_stripped}"
+
         loop = asyncio.get_running_loop()
         try:
-            tracks = await loop.run_in_executor(None, self._extract_sync, url.strip())
+            tracks = await loop.run_in_executor(None, self._extract_sync, url_stripped)
         except YoutubeError:
             raise
         except Exception as exc:

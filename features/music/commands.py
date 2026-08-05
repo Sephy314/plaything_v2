@@ -54,11 +54,11 @@ async def music_url_autocomplete(
 ) -> list[app_commands.Choice[str]]:
     """Autocomplete for music URL parameter."""
     presets = [
-        ("Lo-Fi Beats (공부/작업용)", "https://www.youtube.com/watch?v=jfKfPfyJRdk"),
-        ("Jazz/Chill Café Music (카페 음악)", "https://www.youtube.com/watch?v=tNkZsKeCyLH"),
-        ("Synthwave / Retro Synth (신스웨이브)", "https://www.youtube.com/watch?v=4xDzrJKXOOY"),
-        ("Piano Study Music (클래식 피아노)", "https://www.youtube.com/watch?v=H17_S6Csz9c"),
-        ("Gaming Chill Mix (게임 브금)", "https://www.youtube.com/watch?v=fKOPQ562mhs"),
+        ("Lo-Fi Beats (공부/작업용)", "ytsearch1:lofi beats study"),
+        ("Jazz/Chill Café Music (카페 음악)", "ytsearch1:jazz chill cafe music"),
+        ("Synthwave / Retro Synth (신스웨이브)", "ytsearch1:synthwave retro synth"),
+        ("Piano Study Music (클래식 피아노)", "ytsearch1:piano study music"),
+        ("Gaming Chill Mix (게임 브금)", "ytsearch1:gaming chill background music"),
     ]
     
     # Filter with both prefix and partial matching
@@ -100,7 +100,7 @@ class MusicCog(FeatureCog):
 
     @app_commands.command(name="재생해", description="YouTube 영상 또는 플레이리스트를 재생합니다.")
     @app_commands.describe(
-        url="YouTube 영상 또는 플레이리스트 URL",
+        url="YouTube URL 또는 검색어",
         loop="반복 재생 여부 (계속)",
     )
     @app_commands.autocomplete(url=music_url_autocomplete)
