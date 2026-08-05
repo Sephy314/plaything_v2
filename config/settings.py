@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.exceptions import ConfigurationException
@@ -33,9 +33,22 @@ class Settings(BaseSettings):
     discord_token: str = Field(..., description="Discord bot token")
     meal_url: str = Field("", description="Meal API URL (unused in this stage)")
     mc_parent_directory: str = Field("", description="Minecraft server parent directory")
+    mc_port_start: int = Field(25565, description="First Minecraft port (published range)")
+    mc_port_end: int = Field(25620, description="Last Minecraft port (published range)")
+    mc_public_host: str = Field(
+        "",
+        validation_alias=AliasChoices("MC_PUBLIC_HOST", "MC_EXTERNAL_HOST"),
+        description="Public IP/hostname players use to connect (e.g. 1.2.3.4)",
+    )
+    mc_internal_host: str = Field(
+        "", description="Internal address (same machine) for players on the host"
+    )
     log_channel_id: int = Field(0, description="Discord channel id for log output")
     mc_java_command: str = Field("java", description="Java executable used to run servers")
-    mc_server_version: str = Field("1.21.4", description="Vanilla server version to download")
+    mc_server_flavor: str = Field(
+        "paper", description="Server jar flavor: 'paper' (default) or 'vanilla'"
+    )
+    mc_server_version: str = Field("1.21.4", description="Server version to download")
     mc_max_memory: str = Field("1G", description="Maximum JVM heap for servers (e.g. 2G)")
     mc_rcon_host: str = Field("127.0.0.1", description="Host the RCON protocol listens on")
     mc_rcon_port: int = Field(25575, description="Default RCON port")
@@ -46,6 +59,7 @@ class Settings(BaseSettings):
     mc_idle_shutdown_seconds: int = Field(
         300, description="Seconds at 0 players before auto shutdown"
     )
+    ffmpeg_executable: str = Field("ffmpeg", description="FFmpeg executable for audio playback")
 
     @field_validator("database_dsn")
     @classmethod

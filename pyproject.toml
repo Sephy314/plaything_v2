@@ -22,6 +22,8 @@ dependencies = [
     "alembic>=1.13.0",
     "sqlalchemy>=2.0.0",
     "psycopg2-binary>=2.9.0",
+    "yt-dlp>=2024.12.13",
+    "edge-tts>=6.1.0",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +43,9 @@ packages = [
     "repository",
     "services",
     "voice",
+    "voice.audio",
+    "voice.tts",
+    "voice.music",
     "utils",
     "features",
     "features.minecraft",

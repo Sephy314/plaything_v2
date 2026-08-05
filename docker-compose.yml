@@ -17,7 +17,7 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "5432:5432"
+      - "5433:5433"
 
   bot:
     build: .
@@ -30,8 +30,15 @@ services:
       - .env
     environment:
       DATABASE_DSN: postgresql://plaything:plaything@postgres:5432/plaything
+    ports:
+      - "${MC_PORT_START:-25565}-${MC_PORT_END:-25620}:${MC_PORT_START:-25565}-${MC_PORT_END:-25620}"
     volumes:
       - bot_logs:/app/logs
+      # Bind the real host Minecraft folder at the same absolute path inside the
+      # container, so folder_path values are genuine host paths (no /srv/... indirection).
+      - ${MC_PARENT_DIRECTORY:-/home/sephy/mctest}:${MC_PARENT_DIRECTORY:-/home/sephy/mctest}
+    logging:
+      driver: journald
     command: ["python", "-m", "bot.main"]
 
 volumes:

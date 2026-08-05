@@ -13,12 +13,17 @@ from core.database import Database
 from core.logger import get_logger
 from core.scheduler import Scheduler
 from repository.minecraft_repository import MinecraftRepository
+from repository.tts_voice_repository import TTSVoiceRepository
 from repository.user_repository import UserRepository
 from repository.voice_repository import VoiceRepository
 from services.minecraft_service import MinecraftService
+from services.tts_voice_service import TTSVoiceService
 from services.user_service import UserService
 from services.voice_service import VoiceService
+from voice.audio.manager import AudioManager
 from voice.manager import VoiceManager
+from voice.music.youtube import YoutubeClient
+from voice.tts.provider import ProviderRegistry
 
 log = get_logger(__name__)
 
@@ -34,10 +39,15 @@ class Container:
         self.user_repository = UserRepository(self.database)
         self.voice_repository = VoiceRepository(self.database)
         self.minecraft_repository = MinecraftRepository(self.database)
+        self.tts_voice_repository = TTSVoiceRepository(self.database)
 
         self.user_service = UserService(self.database)
         self.voice_service = VoiceService(self.voice_repository)
         self.minecraft_service = MinecraftService(self.minecraft_repository, settings)
+        self.tts_voice_service = TTSVoiceService(self.tts_voice_repository)
+
+        self.youtube = YoutubeClient()
+        self.tts_providers = ProviderRegistry()
 
         self.voice_manager: VoiceManager | None = None
         self.log_queue: Any | None = None
@@ -50,7 +60,28 @@ class Container:
             bot: The created :class:`commands.Bot`.
         """
         self.bot = bot
-        self.voice_manager = VoiceManager(bot)
+        self.voice_manager = VoiceManager(
+            bot,
+            ffmpeg=self.settings.ffmpeg_executable,
+            audio_factory=self._build_audio,
+        )
+
+    def _build_audio(self, voice_client: Any) -> AudioManager:
+        """Construct an :class:`AudioManager` bound to a voice client.
+
+        Args:
+            voice_client: The Discord voice client for a guild.
+
+        Returns:
+            A configured :class:`AudioManager`.
+        """
+        return AudioManager(
+            voice_client,
+            ffmpeg=self.settings.ffmpeg_executable,
+            provider_registry=self.tts_providers,
+            tts_voice_service=self.tts_voice_service,
+            youtube=self.youtube,
+        )
 
 
 container: Container | None = None

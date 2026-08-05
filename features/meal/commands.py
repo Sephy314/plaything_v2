@@ -36,4 +36,4 @@ class MealCog(FeatureCog):
 
 async def setup(bot: Bot) -> None:
     """Register the cog with the bot."""
-    bot.add_cog(MealCog(bot))
+    await bot.add_cog(MealCog(bot))

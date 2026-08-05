@@ -79,14 +79,28 @@ class RCONClient:
     async def _authenticate(self, password: str, timeout: float) -> None:
         request_id = self._next_request_id()
         await self._send(SERVERDATA_AUTH, password.encode("utf-8"), request_id)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
         try:
-            response_id, packet_type, _ = await asyncio.wait_for(
-                self._recv_packet(), timeout=timeout
-            )
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise TimeoutError
+                response_id, packet_type, _ = await asyncio.wait_for(
+                    self._recv_packet(), timeout=remaining
+                )
+                if packet_type == SERVERDATA_RESPONSE_VALUE:
+                    continue
+                if packet_type == SERVERDATA_AUTH_RESPONSE:
+                    break
         except (TimeoutError, RCONError) as exc:
             raise RCONAuthError("Timed out waiting for RCON auth response") from exc
 
-        if response_id == -1 or packet_type != SERVERDATA_AUTH_RESPONSE:
+        if (
+            response_id == -1
+            or response_id != request_id
+            or packet_type != SERVERDATA_AUTH_RESPONSE
+        ):
             raise RCONAuthError("RCON authentication rejected (bad password)")
         self._authenticated = True
 

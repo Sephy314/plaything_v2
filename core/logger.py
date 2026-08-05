@@ -74,7 +74,28 @@ def _build_handlers(queue: asyncio.Queue[str] | None) -> list[logging.Handler]:
         discord_handler.setFormatter(formatter)
         handlers.append(discord_handler)
 
+    journal_handler = _build_journal_handler()
+    if journal_handler is not None:
+        journal_handler.setLevel(logging.INFO)
+        journal_handler.setFormatter(formatter)
+        handlers.append(journal_handler)
+
     return handlers
+
+
+def _build_journal_handler() -> logging.Handler | None:
+    """Return a systemd journal handler, or ``None`` if unavailable.
+
+    The ``systemd`` python module is optional; when it is missing (e.g. a
+    Docker image without the package) the handler is skipped gracefully and
+    the remaining stream/file/discord destinations still apply.
+    """
+    try:
+        from systemd.journal import JournalHandler
+
+        return JournalHandler()
+    except Exception:
+        return None
 
 
 def setup_logging(queue: asyncio.Queue[str] | None = None) -> None:

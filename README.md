@@ -40,7 +40,7 @@ cp .env.example .env
 | `DISCORD_TOKEN` | Discord 봇 토큰 | ✅ |
 | `MEAL_URL` | 급식 API URL (이번 단계 미사용) | |
 | `MC_PARENT_DIRECTORY` | Minecraft 서버 폴더 상위 경로 | |
-| `MC_JAVA_COMMAND` | Java 실행 파일 (기본 `java`) | |
+| `MC_JAVA_COMMAND` | Java 실행 파일 (Paper 26.1+는 Java 25 필요) | |
 | `MC_SERVER_VERSION` | 서버 부트스트랩용 바닐라 버전 | |
 | `MC_RCON_PASSWORD_SECRET` | 서버별 RCON 패스워드 파생용 시크릿 | |
 | `MC_IDLE_SHUTDOWN_SECONDS` | 플레이어 0명 시 자동종료 대기(초) | |

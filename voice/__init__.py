@@ -1,14 +1,14 @@
-"""Voice playback infrastructure (design stage).
+"""Voice playback infrastructure.
 
-* ``voice/audio_manager.py`` defines the shared ``AudioManager`` interface
-  used by future Youtube and TTS features.
-* ``voice/manager.py`` provides the ``VoiceManager`` that tracks Discord
-  voice connections per guild.
+* ``voice/manager.py`` — guild-level :class:`VoiceManager`.
+* ``voice/audio`` — shared mixing / source / audio manager layer.
+* ``voice/tts`` — TTS providers and player.
+* ``voice/music`` — YouTube extraction and music player.
 """
 
 from __future__ import annotations
 
-from voice.audio_manager import AudioManager
+from voice.audio.manager import AudioManager
 from voice.manager import VoiceManager
 
 __all__ = ["AudioManager", "VoiceManager"]

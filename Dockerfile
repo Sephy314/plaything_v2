@@ -6,10 +6,15 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Minecraft 26.1+ requires Java 25.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-25-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml alembic.ini ./
+COPY . .
 RUN pip install --upgrade pip && pip install .
 
-COPY . .
 
 EXPOSE 8080
 

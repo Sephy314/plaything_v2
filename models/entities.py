@@ -45,6 +45,16 @@ class VoiceSetting(Base):
     voice_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
 
+class TTSVoiceSetting(Base, TimestampMixin):
+    """Per-user TTS voice / language configuration."""
+
+    __tablename__ = "tts_voice_settings"
+
+    discord_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    voice_id: Mapped[str] = mapped_column(String(255), nullable=False, server_default="default")
+    language: Mapped[str] = mapped_column(String(16), nullable=False, server_default="en")
+
+
 class MinecraftServer(Base, TimestampMixin):
     """A managed Minecraft server."""
 

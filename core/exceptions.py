@@ -27,6 +27,18 @@ class VoiceException(AppException):
     """Raised when a voice operation fails."""
 
 
+class MusicException(AppException):
+    """Base class for music playback failures."""
+
+
+class YoutubeError(MusicException):
+    """Raised when a YouTube URL cannot be resolved or is unavailable."""
+
+
+class PlaybackError(MusicException):
+    """Raised when an audio source cannot be played."""
+
+
 class ValidationException(AppException):
     """Raised when input validation fails."""
 

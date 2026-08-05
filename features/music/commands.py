@@ -41,4 +41,4 @@ class MusicCog(FeatureCog):
 async def setup(bot: Bot) -> None:
     """Register the cog with the bot."""
     get_container()
-    bot.add_cog(MusicCog(bot))
+    await bot.add_cog(MusicCog(bot))
