@@ -154,6 +154,8 @@ PostgreSQL 컨테이너가 healthy 상태가 될 때까지 기다린 후 봇이 
 | `MC_RCON_PASSWORD_SECRET` | `change-me` | 서버별 RCON 패스워드 파생용 시크릿 |
 | `MC_MONITOR_INTERVAL_SECONDS` | `30` | 플레이어 수 확인 주기 |
 | `MC_IDLE_SHUTDOWN_SECONDS` | `300` | 플레이어 0명 상태에서 자동 종료까지 대기(초) |
+| `MC_BACKUP_DIRECTORY` | `./backups` | 서버별 월드 백업이 저장되는 루트 디렉토리 |
+| `MC_BACKUP_RETENTION_DAYS` | `90` | 이 기간(일)보다 오래된 백업 삭제 (서버별 최신 1개는 항상 유지) |
 | `FFMPEG_EXECUTABLE` | `ffmpeg` | 오디오 재생에 사용할 FFmpeg 실행 파일 |
 | `LOG_CHANNEL_ID` | `0` | 로그 Embed를 보낼 Discord 채널 (`0`이면 비활성) |
 
@@ -177,11 +179,13 @@ PostgreSQL 컨테이너가 healthy 상태가 될 때까지 기다린 후 봇이 
 | `/마크_uuid등록 <user> <uuid>` | Discord 유저 ↔ Minecraft UUID 연결 | 관리자 |
 | `/마크_화이트리스트 <alias> <add\|remove> <nickname>` | 화이트리스트 관리 | — |
 | `/마크_맵가져오기 <alias> [port]` | 외부 서버 폴더를 가져와 관리 서버로 등록 (Psql 반영 + 화이트리스트/OP 적용) | 관리자 |
+| `/마크_백업 <alias>` | 서버 월드 백업 생성 | 관리자 |
 
 동작 요약:
 
 - `/마크_생성`은 폴더 생성 → 기본 파일(`server.properties`, `eula.txt`, whitelist/ops) 작성 → DB Insert를 원자적으로 수행하며, 실패 시 폴더를 삭제하고 롤백합니다. `white-list=true`와 RCON이 기본 활성화됩니다.
 - `/마크_맵가져오기`는 이미 디스크에 존재하는 외부 서버/맵 폴더를 `MC_PARENT_DIRECTORY`에서 찾아 PostgreSQL `minecraft_servers`에 등록합니다(관리자 전용). 등록 시 폴더의 `server.properties`에서 포트를 읽고(없으면 자동 할당), RCON·whitelist 강제를 활성화한 뒤, `/마크_uuid등록`으로 연결된 모든 유저를 `whitelist.json`/`ops.json`에 반영합니다. 맵 폴더를 Discord로 올릴 필요 없이 호스트에 폴더만 두면 됩니다.
+- `/마크_백업`(관리자 전용)은 서버 월드(`world/`, `world_nether/`, `world_the_end/`), 서버 설정(`server.properties`, `bukkit.yml`, `spigot.yml`, `config/paper-global.yml`), 플러그인 데이터(`plugins/`)를 `<MC_BACKUP_DIRECTORY>/<alias>/<alias>-YYYYMMDD-HHmmss.backup.zip`로 압축합니다. 실행 중인 서버는 `save-off` → `save-all flush` → `save-on` 순서로 안전하게 백업하며, 실패 시 기존 백업을 유지하고 저장을 다시 켭니다. `MC_BACKUP_RETENTION_DAYS`보다 오래된 백업은 자동 삭제되며 서버별 최신 백업 1개는 항상 유지됩니다.
 - `/마크_명령어`는 Discord 권한이 아닌 **서버 `ops.json`의 OP 여부**로 검증합니다.
 - 실행 중인 서버는 주기적으로(`list` 명령) 폴링되어 `minecraft_sessions`에 플레이어 수가 기록되며, `MC_IDLE_SHUTDOWN_SECONDS` 동안 플레이어가 0명이면 자동 종료됩니다(플레이어 입장 시 타이머 해제).
 

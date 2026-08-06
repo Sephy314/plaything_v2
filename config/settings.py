@@ -34,7 +34,10 @@ class Settings(BaseSettings):
     meal_url: str = Field("", description="NEIS meal API URL (mealServiceDietInfo base)")
     meal_channel_id: int = Field(
         0,
-        description="Discord channel id for the daily meal output (0 = fall back to LOG_CHANNEL_ID)",
+        description=(
+            "Discord channel id for the daily meal output "
+            "(0 = fall back to LOG_CHANNEL_ID)"
+        ),
     )
     timezone: str = Field(
         "Asia/Seoul",
@@ -66,6 +69,14 @@ class Settings(BaseSettings):
     mc_monitor_interval_seconds: int = Field(30, description="Player-check interval")
     mc_idle_shutdown_seconds: int = Field(
         300, description="Seconds at 0 players before auto shutdown"
+    )
+    mc_backup_directory: str = Field(
+        "./backups",
+        description="Root directory that holds per-server world backups",
+    )
+    mc_backup_retention_days: int = Field(
+        90,
+        description="Delete backups older than this many days (kept while no newer backup exists)",
     )
     ffmpeg_executable: str = Field("ffmpeg", description="FFmpeg executable for audio playback")
 

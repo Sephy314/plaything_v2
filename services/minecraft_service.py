@@ -444,6 +444,27 @@ class MinecraftService:
         log.info("Whitelist updated: alias=%s action=%s nickname=%s", alias, action, nickname)
         return output
 
+    async def is_running(self, alias: str) -> bool:
+        """Return whether a server process is currently managed/running."""
+        server = await self.find_server(alias)
+        return server.id in self._processes
+
+    async def send_rcon(self, alias: str, command: str) -> str:
+        """Execute an RCON command with no permission checks (internal use).
+
+        Used by internal subsystems such as the world backup service to run
+        ``save-off`` / ``save-all flush`` / ``save-on``.
+
+        Args:
+            alias: The server alias.
+            command: The command string.
+
+        Returns:
+            The command's console output.
+        """
+        server = await self.find_server(alias)
+        return await self._rcon_exec(server, command)
+
     async def read_logs(self, alias: str, lines: int = 50) -> str:
         """Read the last N lines of the server's latest.log file."""
         server = await self.find_server(alias)

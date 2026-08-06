@@ -152,6 +152,8 @@ Optional variables:
 | `MC_RCON_PASSWORD_SECRET` | `change-me` | Secret used to derive per-server RCON passwords |
 | `MC_MONITOR_INTERVAL_SECONDS` | `30` | Player-check interval |
 | `MC_IDLE_SHUTDOWN_SECONDS` | `300` | Seconds at 0 players before auto shutdown |
+| `MC_BACKUP_DIRECTORY` | `./backups` | Root directory for per-server world backups |
+| `MC_BACKUP_RETENTION_DAYS` | `90` | Delete backups older than this many days (newest per server always kept) |
 | `FFMPEG_EXECUTABLE` | `ffmpeg` | FFmpeg executable for audio playback |
 | `LOG_CHANNEL_ID` | `0` | Discord channel for log embeds (`0` disables) |
 
@@ -175,11 +177,13 @@ All commands are **slash commands** (application commands) and are synced automa
 | `/마크_uuid등록 <user> <uuid>` | Link a Discord user ↔ Minecraft UUID | Admin |
 | `/마크_화이트리스트 <alias> <add\|remove> <nickname>` | Manage the whitelist | — |
 | `/마크_맵가져오기 <alias> [port]` | Import an external server/map folder as a managed server (registered in PostgreSQL, whitelist/OP applied) | Admin |
+| `/마크_백업 <alias>` | Create a server world backup | Admin |
 
 Behavior notes:
 
 - `/마크_생성` atomically creates the folder, writes the default files (`server.properties`, `eula.txt`, whitelist/ops), and inserts the DB row — rolling back (deleting the folder) on failure. `white-list=true` and RCON are enabled by default.
 - `/마크_맵가져오기` (admin-only) finds an existing external server/map folder under `MC_PARENT_DIRECTORY`, registers it in the PostgreSQL `minecraft_servers` table, reads the port from the folder's `server.properties` (or auto-assigns one), enables RCON / whitelist enforcement, and applies every Discord↔UUID-registered member to the folder's `whitelist.json` / `ops.json`. Instead of uploading the map folder to Discord, just place the folder on the host.
+- `/마크_백업` (admin-only) snapshots the server world (`world/`, `world_nether/`, `world_the_end/`), server config (`server.properties`, `bukkit.yml`, `spigot.yml`, `config/paper-global.yml`) and `plugins/` into `<MC_BACKUP_DIRECTORY>/<alias>/<alias>-YYYYMMDD-HHmmss.backup.zip`. While the server runs it uses `save-off` → `save-all flush` → `save-on`; a failed backup keeps existing archives and re-enables world saving. Backups older than `MC_BACKUP_RETENTION_DAYS` are pruned automatically (the newest backup per server is always kept).
 - `/마크_명령어` is gated by the **server's `ops.json` OP status**, not by Discord permissions.
 - Running servers are polled (`list` command) on an interval; the player count is recorded in `minecraft_sessions`, and an idle timer shuts the server down after `MC_IDLE_SHUTDOWN_SECONDS` with 0 players (the timer is cancelled when a player joins).
 

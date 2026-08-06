@@ -18,6 +18,8 @@ from discord.ext.commands import Bot
 
 from core.exceptions import (
     MinecraftAliasExists,
+    MinecraftBackupError,
+    MinecraftBackupInProgress,
     MinecraftFolderError,
     MinecraftFolderNotFound,
     MinecraftPermissionError,
@@ -29,6 +31,7 @@ from core.exceptions import (
 )
 from core.logger import get_logger
 from features.base import FeatureCog
+from services.minecraft_backup_service import MinecraftBackupService
 from services.minecraft_service import MinecraftService
 
 log = get_logger(__name__)
@@ -209,9 +212,15 @@ async def external_folder_autocomplete(
 class MinecraftCog(FeatureCog):
     """Slash commands for Minecraft server management."""
 
-    def __init__(self, bot: Bot, service: MinecraftService) -> None:
+    def __init__(
+        self,
+        bot: Bot,
+        service: MinecraftService,
+        backup_service: MinecraftBackupService,
+    ) -> None:
         super().__init__(bot)
         self._service = service
+        self._backup_service = backup_service
 
     # ------------------------------------------------------------------
     # Server creation
@@ -497,6 +506,33 @@ class MinecraftCog(FeatureCog):
         )
 
     # ------------------------------------------------------------------
+    # World backup (admin-only)
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="마크_백업",
+        description="서버 월드 백업을 생성합니다. (관리자)",
+    )
+    @app_commands.describe(alias="서버 별명")
+    @app_commands.autocomplete(alias=server_autocomplete)
+    @app_commands.default_permissions(administrator=True)
+    async def mc_backup(
+        self,
+        interaction: discord.Interaction,
+        alias: str,
+    ) -> None:
+        """Create a world backup for the named server."""
+        await interaction.response.defer()
+        try:
+            path = await self._backup_service.create_backup(
+                alias.strip(), created_by=interaction.user.id
+            )
+        except Exception as exc:
+            await self._handle_error(interaction, exc)
+            return
+        await interaction.followup.send(f"백업 완료: `{path}`")
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
@@ -522,6 +558,8 @@ class MinecraftCog(FeatureCog):
             MinecraftRconError: "RCON 통신에 실패했습니다.",
             MinecraftPermissionError: "이 서버에서 OP 권한이 없습니다.",
             MinecraftUnauthorized: "권한이 없거나 입력이 올바르지 않습니다.",
+            MinecraftBackupInProgress: "이미 백업이 진행 중입니다. 잠시 후 다시 시도해 주세요.",
+            MinecraftBackupError: "백업에 실패했습니다. 기존 백업은 유지됩니다.",
         }
         if isinstance(exc, (MinecraftPortConflict, MinecraftFolderNotFound)):
             log.warning("minecraft command rejected: %s", exc)
@@ -541,5 +579,9 @@ async def setup(bot: Bot) -> None:
     """Register the cog with the bot."""
     from core.container import container
 
-    cog = MinecraftCog(bot, container.minecraft_service)
+    cog = MinecraftCog(
+        bot,
+        container.minecraft_service,
+        container.minecraft_backup_service,
+    )
     await bot.add_cog(cog)
