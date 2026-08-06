@@ -35,7 +35,12 @@ from core.exceptions import (
 )
 from core.logger import get_logger
 from features.minecraft.models import STATUS_RUNNING, STATUS_STOPPED, MinecraftServer, MinecraftUser
-from features.minecraft.rcon import RCONClient, RCONError
+from features.minecraft.rcon import (
+    RCONAuthError,
+    RCONClient,
+    RCONConnectionError,
+    RCONError,
+)
 from repository.minecraft_repository import MinecraftRepository
 
 log = get_logger(__name__)
@@ -894,7 +899,11 @@ class MinecraftService:
         host = self._settings.mc_rcon_host
         port, password = self._rcon_connection_details(server)
 
-        # Retry logic for RCON connections (server may still be initializing)
+        # Only connection / auth failures are retried. Once the command has
+        # been handed to the server it must never be re-sent: RCON commands are
+        # not idempotent, so retrying after a response timeout would execute the
+        # command multiple times on the server (e.g. summoning the same entity
+        # 3 times) even though each attempt "succeeded" server-side.
         max_retries = 3
         last_error = None
         for attempt in range(max_retries):
@@ -904,12 +913,20 @@ class MinecraftService:
                 result = await client.command(command, timeout=30.0)
                 await client.close()
                 return result
-            except RCONError as exc:
+            except (RCONConnectionError, RCONAuthError) as exc:
+                # Connection could not be established / auth rejected — the
+                # command was never sent, so retrying is safe.
                 last_error = exc
                 await client.close()
                 if attempt < max_retries - 1:
                     # Wait before retrying (exponential backoff)
                     await asyncio.sleep(2 ** attempt)
+            except RCONError as exc:
+                # The command was already sent and the server may have executed
+                # it. Do NOT retry — that would execute it again.
+                last_error = exc
+                await client.close()
+                break
 
         raise MinecraftRconError(f"RCON failed for '{server.alias}': {last_error}") from last_error
 
