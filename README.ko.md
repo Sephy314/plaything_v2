@@ -156,6 +156,7 @@ PostgreSQL 컨테이너가 healthy 상태가 될 때까지 기다린 후 봇이 
 | `MC_IDLE_SHUTDOWN_SECONDS` | `300` | 플레이어 0명 상태에서 자동 종료까지 대기(초) |
 | `MC_BACKUP_DIRECTORY` | `./backups` | 서버별 월드 백업이 저장되는 루트 디렉토리 |
 | `MC_BACKUP_RETENTION_DAYS` | `90` | 이 기간(일)보다 오래된 백업 삭제 (서버별 최신 1개는 항상 유지) |
+| `MC_BACKUP_HOUR` / `MC_BACKUP_MINUTE` | `4` / `0` | 매일 자동 백업 시간(24h); 모든 서버 백업 후 오래된 백업 정리 |
 | `FFMPEG_EXECUTABLE` | `ffmpeg` | 오디오 재생에 사용할 FFmpeg 실행 파일 |
 | `LOG_CHANNEL_ID` | `0` | 로그 Embed를 보낼 Discord 채널 (`0`이면 비활성) |
 

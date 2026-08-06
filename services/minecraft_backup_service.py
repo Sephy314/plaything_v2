@@ -123,6 +123,30 @@ class MinecraftBackupService:
             log.info("removed old backup file=%s", path.name)
         return removed
 
+    async def backup_all(self) -> tuple[int, int]:
+        """Create backups for every registered server.
+
+        Used by the daily scheduler. Failures are logged per server so one
+        failing server never stops the others.
+
+        Returns:
+            ``(server_count, failure_count)``.
+        """
+        servers = await self._mc.list_servers()
+        failures = 0
+        for server in servers:
+            try:
+                await self.create_backup(server.alias)
+            except Exception as exc:
+                failures += 1
+                log.error(
+                    "automatic backup failed server=%s: %s",
+                    server.alias,
+                    exc,
+                    exc_info=exc,
+                )
+        return len(servers), failures
+
     async def cleanup_all(self) -> dict[str, list[Path]]:
         """Run retention cleanup for every registered server.
 

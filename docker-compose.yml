@@ -30,10 +30,13 @@ services:
       - .env
     environment:
       DATABASE_DSN: postgresql://plaything:plaything@postgres:5432/plaything
+      # Backups persist in the bot_backups volume mounted at /app/backups.
+      MC_BACKUP_DIRECTORY: /app/backups
     ports:
       - "${MC_PORT_START:-25565}-${MC_PORT_END:-25620}:${MC_PORT_START:-25565}-${MC_PORT_END:-25620}"
     volumes:
       - bot_logs:/app/logs
+      - bot_backups:/app/backups
       # Bind the real host Minecraft folder at the same absolute path inside the
       # container, so folder_path values are genuine host paths (no /srv/... indirection).
       - ${MC_PARENT_DIRECTORY:-/home/sephy/mctest}:${MC_PARENT_DIRECTORY:-/home/sephy/mctest}
@@ -44,3 +47,4 @@ services:
 volumes:
   postgres_data:
   bot_logs:
+  bot_backups:

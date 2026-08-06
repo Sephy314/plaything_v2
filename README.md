@@ -154,6 +154,7 @@ Optional variables:
 | `MC_IDLE_SHUTDOWN_SECONDS` | `300` | Seconds at 0 players before auto shutdown |
 | `MC_BACKUP_DIRECTORY` | `./backups` | Root directory for per-server world backups |
 | `MC_BACKUP_RETENTION_DAYS` | `90` | Delete backups older than this many days (newest per server always kept) |
+| `MC_BACKUP_HOUR` / `MC_BACKUP_MINUTE` | `4` / `0` | Daily automatic backup time (24h); backs up every server and prunes expired backups |
 | `FFMPEG_EXECUTABLE` | `ffmpeg` | FFmpeg executable for audio playback |
 | `LOG_CHANNEL_ID` | `0` | Discord channel for log embeds (`0` disables) |
 

@@ -279,3 +279,59 @@ async def test_retention_case4_servers_do_not_interfere(tmp_path: Path) -> None:
     assert surv_new.exists()
     assert crea_old.exists()
     assert crea_new.exists()
+
+
+# ----------------------------------------------------------------------
+# backup_all (scheduled job helper)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_backup_all_tolerates_failures(tmp_path: Path) -> None:
+    ok_folder = tmp_path / "okserver"
+    _make_world_folder(ok_folder)
+    ok_server = _make_server(ok_folder, alias="ok")
+    now = datetime.now(UTC)
+    bad_server = MinecraftServer(
+        id=2,
+        alias="bad",
+        folder_path=str(tmp_path / "missing"),
+        port=25566,
+        status="stopped",
+        created_by=1,
+        created_at=now,
+        updated_at=now,
+    )
+
+    class _MultiMC(_FakeMC):
+        def __init__(self, servers: list[MinecraftServer]) -> None:
+            self._servers = servers
+            self.commands: list[str] = []
+
+        async def find_server(self, name: str) -> MinecraftServer:
+            for server in self._servers:
+                if server.alias == name:
+                    return server
+            raise MinecraftServerNotFound(name)
+
+        async def is_running(self, name: str) -> bool:
+            return False
+
+        async def send_rcon(self, name: str, command: str) -> str:
+            return "ok"
+
+        async def list_servers(self) -> list[MinecraftServer]:
+            return list(self._servers)
+
+    service = MinecraftBackupService(
+        _MultiMC([ok_server, bad_server]), _make_settings(tmp_path)
+    )
+
+    total, failures = await service.backup_all()
+
+    assert total == 2
+    assert failures == 1  # 'bad' has a missing folder
+    # The healthy server still produced a backup.
+    assert any((tmp_path / "backups" / "ok").glob("*.backup.zip"))
+    # The failed server left no archive behind.
+    assert not (tmp_path / "backups" / "bad").exists()

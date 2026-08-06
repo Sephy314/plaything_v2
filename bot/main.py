@@ -100,6 +100,7 @@ async def _register_jobs(container) -> None:
     """
     container.scheduler.add_job(scheduler_heartbeat, "interval", minutes=1, id="heartbeat")
     container.meal_scheduler.register()
+    container.minecraft_backup_scheduler.register()
     log.info("scheduled jobs registered")
 
 
