@@ -174,10 +174,12 @@ All commands are **slash commands** (application commands) and are synced automa
 | `/마크_명령어 <alias> <command>` | Run an RCON command | In-game OP |
 | `/마크_uuid등록 <user> <uuid>` | Link a Discord user ↔ Minecraft UUID | Admin |
 | `/마크_화이트리스트 <alias> <add\|remove> <nickname>` | Manage the whitelist | — |
+| `/마크_맵가져오기 <alias> [port]` | Import an external server/map folder as a managed server (registered in PostgreSQL, whitelist/OP applied) | Admin |
 
 Behavior notes:
 
 - `/마크_생성` atomically creates the folder, writes the default files (`server.properties`, `eula.txt`, whitelist/ops), and inserts the DB row — rolling back (deleting the folder) on failure. `white-list=true` and RCON are enabled by default.
+- `/마크_맵가져오기` (admin-only) finds an existing external server/map folder under `MC_PARENT_DIRECTORY`, registers it in the PostgreSQL `minecraft_servers` table, reads the port from the folder's `server.properties` (or auto-assigns one), enables RCON / whitelist enforcement, and applies every Discord↔UUID-registered member to the folder's `whitelist.json` / `ops.json`. Instead of uploading the map folder to Discord, just place the folder on the host.
 - `/마크_명령어` is gated by the **server's `ops.json` OP status**, not by Discord permissions.
 - Running servers are polled (`list` command) on an interval; the player count is recorded in `minecraft_sessions`, and an idle timer shuts the server down after `MC_IDLE_SHUTDOWN_SECONDS` with 0 players (the timer is cancelled when a player joins).
 

@@ -63,6 +63,10 @@ class MinecraftFolderError(MinecraftException):
     """Raised when server folder setup fails."""
 
 
+class MinecraftFolderNotFound(MinecraftFolderError):
+    """Raised when an external server folder to migrate does not exist."""
+
+
 class MinecraftProcessError(MinecraftException):
     """Raised when the server process fails to start or stop."""
 
