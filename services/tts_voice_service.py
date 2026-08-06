@@ -37,7 +37,7 @@ class TTSVoiceService:
 
     def list_voices(self) -> list[str]:
         """Return all available voice IDs.
-        
+
         Returns:
             List of voice identifiers including language-specific and default.
         """

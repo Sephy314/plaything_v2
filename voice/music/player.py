@@ -8,11 +8,11 @@ voice playback thread via :meth:`read_frame`.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from core.logger import get_logger
-from voice.audio.pcm import FFmpegPcmSource, PcmFrameSource
+from voice.audio.pcm import FFmpegPcmSource
 
 log = get_logger(__name__)
 

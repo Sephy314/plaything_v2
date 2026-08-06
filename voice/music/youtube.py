@@ -56,8 +56,7 @@ class YoutubeClient:
         # double-prefixing values that already carry a ytsearchN: prefix, such
         # as the autocomplete presets ("ytsearch1:...").
         if not (
-            url_stripped.startswith(("http://", "https://"))
-            or _SEARCH_PREFIX.match(url_stripped)
+            url_stripped.startswith(("http://", "https://")) or _SEARCH_PREFIX.match(url_stripped)
         ):
             url_stripped = f"ytsearch1:{url_stripped}"
 

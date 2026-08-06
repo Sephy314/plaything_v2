@@ -156,7 +156,7 @@ Optional variables:
 | `MC_BACKUP_RETENTION_DAYS` | `90` | Delete backups older than this many days (newest per server always kept) |
 | `MC_BACKUP_HOUR` / `MC_BACKUP_MINUTE` | `4` / `0` | Daily automatic backup time (24h); backs up every server and prunes expired backups |
 | `FFMPEG_EXECUTABLE` | `ffmpeg` | FFmpeg executable for audio playback |
-| `LOG_CHANNEL_ID` | `0` | Discord channel for log embeds (`0` disables) |
+| `LOG_CHANNEL_ID` | **required** | Discord channel for log embeds (bot refuses to start without it) |
 
 ## Commands
 
@@ -231,6 +231,16 @@ The daily meal is published **automatically** by the scheduler — no user comma
 | --- | --- |
 | `/help [category]` | Show an overview of all commands, or the details of one category (`minecraft`, `music`, `tts`, `meal`) |
 
+### Admin / Operations
+
+| Command | Description | Permission |
+| --- | --- | --- |
+| `/봇_종료` | Gracefully shut the bot down | Admin |
+| `/봇_재시작` | Gracefully restart the bot (container/systemd re-spawns it) | Admin |
+| `/봇_상태` | Show health: bot, ping, DB, scheduler, voice, uptime | Everyone |
+
+Legacy prefix variants: `!봇 종료`, `!봇 재시작`, `!상태`.
+
 ## Scheduling
 
 - **Daily meal job** — cron trigger at `07:00` in `Asia/Seoul` (`features/meal/scheduler.py`). It fetches `MEAL_URL` with `&MLSV_YMD=<yyyyMMdd>`, applies the NEIS parser (`INFO-000` success / `INFO-200` no meal), and posts to `MEAL_CHANNEL_ID` (falls back to `LOG_CHANNEL_ID`). If the time is past 18:00 it targets tomorrow's meal. All failures (HTTP / timeout / parser / Discord send) are caught and logged — the bot never crashes.
@@ -278,10 +288,54 @@ Discord channel embed
 
 Structured events are emitted with `core.logger.log_event(logger, "Event Name", level=..., **details)`. Tracked events include:
 
-- **Bot**: Started / Ready / Shutdown / Reconnect / Exception
+- **Bot**: Started / Ready / Shutdown / Reconnect / Exception / Unhandled Loop Exception
 - **Scheduler**: Started / Stopped / job error / job missed
 - **Meal**: Fetch Started / Fetch Success / Fetch Failed
 - **Minecraft / TTS / Music**: regular `log.info` / `log.error` calls are reflected as embeds automatically.
+
+## Operations (Admin)
+
+### Permission model
+
+- **General users** — TTS, YouTube, music control, voice leave.
+- **Administrators** (Discord `Administrator` permission or guild owner) — bot shutdown / restart, Minecraft UUID management, system management.
+
+All admin gates are implemented with the shared `@admin_only()` decorator in `core/permissions.py`, which works for both slash and prefix commands.
+
+### Graceful shutdown
+
+`/봇_종료` (or `!봇 종료`) runs the full teardown in `bot/main.py`:
+
+```text
+Command → Permission check → Stop scheduler → Cancel background tasks
+→ Disconnect voice → Save/stop Minecraft servers → Close meal service
+→ Log "Bot Shutdown" → Stop log worker → Discord logout → Close DB pool → exit(0)
+```
+
+### Graceful restart
+
+`/봇_재시작` (or `!봇 재시작`) runs the same teardown and then exits with code **42**. The Docker `restart: unless-stopped` policy (or a systemd unit with `Restart=on-failure`) re-spawns the process automatically.
+
+### Health check
+
+`/봇_상태` (or `!상태`) reports: bot online / ping (ms) / database (ok|error) / scheduler (running|stopped) / voice connections / uptime / version.
+
+### Background tasks
+
+`core/task_manager.py` tracks every long-running task; `shutdown()` cancels and drains them so no orphaned coroutines remain during shutdown.
+
+### Configuration validation
+
+`DATABASE_DSN` and `DISCORD_TOKEN` are required (pydantic). `LOG_CHANNEL_ID` is also required at startup — without it the bot refuses to start with a clear error, because operational logging is mandatory.
+
+## Troubleshooting
+
+- **Slash commands don't appear / stale autocomplete** — commands sync once per process at startup. After deploying new commands, restart the bot and refresh the Discord client. Global command changes can take time to propagate.
+- **`LOG_CHANNEL_ID` missing** — the bot refuses to start. Set it to a Discord channel the bot can post embeds to.
+- **Container not running the new code** — the image must be rebuilt: `docker compose up -d --build`. A stale image shows old behavior even when source changed.
+- **Minecraft servers can't start** — verify `MC_PARENT_DIRECTORY` is mounted into the container and `MC_JAVA_COMMAND` / `MC_SERVER_VERSION` are correct for the Paper/vanilla flavor.
+- **Bot reconnects constantly** — check `LOG_CHANNEL_ID` and that the Discord token / intents are valid; inspect `logs/bot.log` or the container journal.
+- **Database errors** — confirm the Postgres container is healthy (`docker compose ps`) and `DATABASE_DSN` points at the right host/port.
 
 ## Tests & Linting
 
@@ -289,17 +343,17 @@ Structured events are emitted with `core.logger.log_event(logger, "Event Name", 
 pip install -e ".[dev]"
 ruff check .
 black --check .
-pytest
-pytest --cov=core --cov=features --cov-report=term-missing   # coverage
+pytest                        # unit + integration + e2e
+pytest --cov --cov-report=term-missing   # coverage
 ```
 
-Test files:
+Test layout:
 
-- `tests/test_meal.py` — success / no-meal / API failure / parser failure / Discord send
-- `tests/test_meal_commands.py` — `/급식` and `/급식날짜` success, failure, and date validation
-- `tests/test_scheduler.py` — job registration (07:00, Asia/Seoul), execution, and exception handling
-- `tests/test_logger.py` — console / file / Discord handlers, queue behavior, embed rendering, worker
-- `tests/test_minecraft_connection.py`, `tests/test_music.py` — connection and music pipeline tests
+- `tests/unit/` — unit tests (meal, minecraft, music, logger, scheduler, permissions, task manager, database ping, voice manager)
+- `tests/integration/` — service + container wiring (system service health / lifecycle, container composition)
+- `tests/e2e/` — command flow tests (admin cog slash + prefix commands)
+
+CI (GitHub Actions): `.github/workflows/test.yml` (PostgreSQL service → migrations → pytest with coverage) and `.github/workflows/lint.yml` (ruff + black).
 
 ## License
 

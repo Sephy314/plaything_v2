@@ -502,12 +502,12 @@ async def test_read_logs_returns_last_lines() -> None:
     """Test that read_logs returns the last N lines from latest.log."""
     folder = Path("/tmp/test_logs_server")
     folder.mkdir(exist_ok=True)
-    
+
     # Create a log file with multiple lines
     log_file = folder / "latest.log"
     log_content = "\n".join([f"Line {i}" for i in range(1, 21)])  # 20 lines
     log_file.write_text(log_content, encoding="utf-8")
-    
+
     try:
         server = MinecraftServer(
             id=1,
@@ -525,15 +525,16 @@ async def test_read_logs_returns_last_lines() -> None:
             discord_token="token",
         )
         service = minecraft_service.MinecraftService(_FakeRepo(server), settings)
-        
+
         logs = await service.read_logs("test_server", lines=5)
-        
+
         # Should return the last 5 lines
         assert "Line 16" in logs
         assert "Line 20" in logs
         assert "Line 15" not in logs
     finally:
         import shutil
+
         shutil.rmtree(folder, ignore_errors=True)
 
 
@@ -542,7 +543,7 @@ async def test_read_logs_handles_missing_file() -> None:
     """Test that read_logs handles missing log files gracefully."""
     folder = Path("/tmp/test_logs_missing")
     folder.mkdir(exist_ok=True)
-    
+
     try:
         server = MinecraftServer(
             id=1,
@@ -560,13 +561,14 @@ async def test_read_logs_handles_missing_file() -> None:
             discord_token="token",
         )
         service = minecraft_service.MinecraftService(_FakeRepo(server), settings)
-        
+
         logs = await service.read_logs("test_server")
-        
+
         # Should return a friendly message for missing logs
         assert "(로그 파일이 없습니다)" in logs
     finally:
         import shutil
+
         shutil.rmtree(folder, ignore_errors=True)
 
 
@@ -593,23 +595,23 @@ async def test_list_servers_returns_all_servers() -> None:
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
-    
+
     class _MultiServerRepo(_FakeRepo):
         def __init__(self) -> None:
             pass
-        
+
         async def list_servers(self) -> list[MinecraftServer]:
             return [server1, server2]
-    
+
     settings = Settings(
         _env_file=None,
         database_dsn="postgresql://user:pass@localhost/db",
         discord_token="token",
     )
     service = minecraft_service.MinecraftService(_MultiServerRepo(), settings)
-    
+
     servers = await service.list_servers()
-    
+
     assert len(servers) == 2
     assert servers[0].alias == "survival"
     assert servers[1].alias == "creative"

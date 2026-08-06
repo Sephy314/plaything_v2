@@ -90,6 +90,7 @@ async def server_autocomplete(
                 continue
 
             from features.minecraft.models import STATUS_RUNNING
+
             status_str = "🟢 실행중" if server.status == STATUS_RUNNING else "🔴 정지"
             choices.append(
                 app_commands.Choice(
@@ -131,10 +132,7 @@ async def server_running_autocomplete(
         # Filter by current input
         filtered = [s.alias for s in running if _contains_match(s.alias, current)]
 
-        return [
-            app_commands.Choice(name=alias, value=alias)
-            for alias in filtered[:25]
-        ]
+        return [app_commands.Choice(name=alias, value=alias) for alias in filtered[:25]]
     except Exception as e:
         log.error("server_running_autocomplete failed: %s", e, exc_info=True)
         return []
@@ -155,7 +153,8 @@ async def scope_autocomplete(
 
     current_lower = current.lower()
     return [
-        s for s in scopes
+        s
+        for s in scopes
         if s.name.lower().startswith(current_lower) or s.value.lower().startswith(current_lower)
     ]
 
@@ -175,7 +174,8 @@ async def whitelist_action_autocomplete(
 
     current_lower = current.lower()
     return [
-        a for a in actions
+        a
+        for a in actions
         if a.name.lower().startswith(current_lower) or a.value.lower().startswith(current_lower)
     ]
 
@@ -200,10 +200,7 @@ async def external_folder_autocomplete(
 
         names = await service.available_external_folders()
         filtered = [n for n in names if _contains_match(n, current)]
-        return [
-            app_commands.Choice(name=name, value=name)
-            for name in filtered[:25]
-        ]
+        return [app_commands.Choice(name=name, value=name) for name in filtered[:25]]
     except Exception as e:
         log.error("external_folder_autocomplete failed: %s", e, exc_info=True)
         return []
@@ -301,9 +298,7 @@ class MinecraftCog(FeatureCog):
         """
         await interaction.response.defer()
         if scope not in ("external", "internal"):
-            await interaction.followup.send(
-                "범위는 `external` 또는 `internal`만 가능합니다."
-            )
+            await interaction.followup.send("범위는 `external` 또는 `internal`만 가능합니다.")
             return
         internal = scope == "internal"
         try:
@@ -358,6 +353,7 @@ class MinecraftCog(FeatureCog):
             return
 
         from features.minecraft.models import STATUS_RUNNING
+
         lines = ["**등록된 서버 목록:**\n"]
         for server in servers:
             status_icon = "🟢" if server.status == STATUS_RUNNING else "🔴"
@@ -545,9 +541,7 @@ class MinecraftCog(FeatureCog):
             f"접속자: {info['player_count']}명 ({', '.join(info['online_players']) or '없음'})"
         )
 
-    async def _handle_error(
-        self, interaction: discord.Interaction, exc: Exception
-    ) -> None:
+    async def _handle_error(self, interaction: discord.Interaction, exc: Exception) -> None:
         """Reply with a friendly, specific message for the exception type."""
         message = {
             MinecraftServerNotFound: "서버를 찾을 수 없습니다. "

@@ -226,9 +226,7 @@ class MinecraftService:
                 )
             conflict = await self._repository.find_server_by_port(port)
             if conflict is not None:
-                raise MinecraftPortConflict(
-                    f"Port {port} is already in use by another server"
-                )
+                raise MinecraftPortConflict(f"Port {port} is already in use by another server")
 
         server = await self._repository.register_server(alias, str(folder), port, created_by)
         try:
@@ -237,9 +235,7 @@ class MinecraftService:
         except Exception as exc:  # pragma: no cover - defensive
             # The row is already registered; log the post-setup failure instead
             # of rolling the import back entirely.
-            log.warning(
-                "post-migration setup failed for %s: %s", alias, exc, exc_info=exc
-            )
+            log.warning("post-migration setup failed for %s: %s", alias, exc, exc_info=exc)
 
         log.info(
             "External server folder migrated: alias=%s port=%s folder=%s created_by=%s",
@@ -596,11 +592,7 @@ class MinecraftService:
         config_dir = folder / "config"
         config_dir.mkdir(parents=True, exist_ok=True)
         path = config_dir / "paper-global.yml"
-        block = (
-            "spark:\n"
-            "  enable-immediately: false\n"
-            "  enabled: false\n"
-        )
+        block = "spark:\n" "  enable-immediately: false\n" "  enabled: false\n"
         if not path.exists():
             path.write_text(block, encoding="utf-8")
             return
@@ -929,7 +921,7 @@ class MinecraftService:
                 await client.close()
                 if attempt < max_retries - 1:
                     # Wait before retrying (exponential backoff)
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
             except RCONError as exc:
                 # The command was already sent and the server may have executed
                 # it. Do NOT retry — that would execute it again.

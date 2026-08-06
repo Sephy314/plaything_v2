@@ -1,0 +1,40 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: plaything
+          POSTGRES_PASSWORD: plaything
+          POSTGRES_DB: plaything
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U plaything"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_DSN: postgresql://plaything:plaything@localhost:5432/plaything
+      DISCORD_TOKEN: ci-dummy-token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run database migrations
+        run: alembic upgrade head
+      - name: Run tests with coverage
+        run: pytest --cov --cov-report=term-missing --cov-report=xml

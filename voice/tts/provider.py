@@ -132,9 +132,7 @@ class GoogleTranslateTTSProvider(TTSProvider):
             async with aiohttp.ClientSession() as session:
                 async with session.get(self._URL, params=params, headers=headers) as resp:
                     if resp.status != 200:
-                        raise VoiceException(
-                            f"Google TTS returned status {resp.status}"
-                        )
+                        raise VoiceException(f"Google TTS returned status {resp.status}")
                     return await resp.read()
         except aiohttp.ClientError as exc:
             raise VoiceException(f"Google TTS request failed: {exc}") from exc

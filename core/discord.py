@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 
-from discord import Intents
+import discord
+from discord import Intents, app_commands
 from discord.ext import commands
 
 from core.logger import get_logger, log_event
@@ -106,12 +107,40 @@ def create_bot(
     @bot.event
     async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
         message = str(error) or error.__class__.__name__
+        if isinstance(error, commands.CheckFailure):
+            await ctx.send("⚠️ 관리자 권한이 필요합니다.")
+            return
         await ctx.send(f"오류가 발생했습니다: {message}")
         if isinstance(error, commands.CommandError) and not isinstance(
             error,
             (commands.CommandNotFound, commands.UserInputError),
         ):
             log.error("command %s failed: %s", ctx.command, message, exc_info=error)
+
+    @bot.tree.error
+    async def on_app_command_error(
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ) -> None:
+        """Handle slash-command failures (permission checks, unexpected errors)."""
+        if isinstance(error, app_commands.errors.CheckFailure):
+            message = "⚠️ 관리자 권한이 필요합니다."
+        else:
+            message = f"오류가 발생했습니다: {error}"
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except Exception:  # pragma: no cover - defensive
+            pass
+        if not isinstance(error, app_commands.errors.CheckFailure):
+            log.error(
+                "app command %s failed: %s",
+                interaction.command,
+                error,
+                exc_info=error,
+            )
 
     return bot
 

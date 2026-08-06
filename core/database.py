@@ -71,6 +71,21 @@ class Database:
         self._pool = None
         log.info("database disconnected")
 
+    async def ping(self) -> bool:
+        """Return True when the database is reachable (health check).
+
+        Never raises; connectivity problems are reported as ``False`` so the
+        health check can surface them without crashing the bot.
+        """
+        if self._pool is None:
+            return False
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            return True
+        except (OSError, asyncpg.PostgresError):
+            return False
+
     async def fetchval(self, query: str, *args: Any) -> Any:
         """Execute a query and return a single value.
 

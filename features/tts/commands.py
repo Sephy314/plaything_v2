@@ -21,24 +21,24 @@ async def voice_autocomplete(
     """Autocomplete for voice ID parameter with language-specific voices."""
     try:
         from core.container import container, get_container
-        
+
         # Handle both initialized and uninitialized container
         try:
             service = container.tts_voice_service if container else None
-        except:
+        except Exception:
             service = None
-        
+
         if not service:
             try:
                 service = get_container().tts_voice_service
             except RuntimeError:
                 return []
-        
+
         voices = service.list_voices()
-        
+
         # Filter voices by current input (prefix match only)
         filtered = [v for v in voices if v.lower().startswith(current.lower())]
-        
+
         # Create choices with language indicators
         choices = []
         for voice in filtered[:25]:
@@ -50,7 +50,7 @@ async def voice_autocomplete(
                 lang_indicator = " 🇺🇸"
             elif voice == "default":
                 lang_indicator = " 🔤"
-            
+
             choices.append(
                 app_commands.Choice(
                     name=f"{voice}{lang_indicator}",
@@ -75,7 +75,10 @@ class TtsCog(FeatureCog):
     # Voice join
     # ------------------------------------------------------------------
 
-    @app_commands.command(name="tts_입장", description="음성 채널에 입장하고 메시지를 읽기 시작합니다.")
+    @app_commands.command(
+        name="tts_입장",
+        description="음성 채널에 입장하고 메시지를 읽기 시작합니다.",
+    )
     async def tts_join(self, interaction: discord.Interaction) -> None:
         """Join the caller's voice channel and start reading messages."""
         await interaction.response.defer()
