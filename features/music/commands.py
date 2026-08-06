@@ -15,6 +15,7 @@ YouTube tracks with TTS output so both can play simultaneously.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import discord
@@ -25,6 +26,7 @@ from core.exceptions import VoiceException, YoutubeError
 from core.logger import get_logger
 from features.base import FeatureCog
 from features.music.service import MusicService
+from voice.music.player import Track
 
 log = get_logger(__name__)
 
@@ -125,25 +127,52 @@ class MusicCog(FeatureCog):
             await interaction.followup.send("❌ 음성 채널에 접속해야 합니다.")
             return
 
+        # ACK — acknowledge the request immediately so the user knows the
+        # command was received while the (potentially long) download runs.
+        loop_suffix = " (반복 모드)" if loop else ""
+        await interaction.followup.send(
+            f"⏳ 요청을 받았어요! 곡을 불러오는 중이에요...{loop_suffix}\n"
+            "(플레이리스트는 곡 수에 따라 시간이 걸릴 수 있어요)"
+        )
+
+        # "now playing" announcement once a track actually starts. The callback
+        # runs on the voice playback thread, so schedule the send onto the
+        # bot's event loop.
+        text_channel = interaction.channel
+        event_loop = asyncio.get_running_loop()
+
+        def _on_track_started(track: Track) -> None:
+            """Announce a track when it begins (called from the voice thread)."""
+
+            async def _send() -> None:
+                try:
+                    await text_channel.send(f"🎵 재생 중: **{track.title}**{loop_suffix}")
+                except Exception as exc:
+                    log.error("failed to send now-playing message: %s", exc, exc_info=exc)
+
+            if text_channel is None:
+                return
+            try:
+                asyncio.run_coroutine_threadsafe(_send(), event_loop)
+            except Exception as exc:
+                log.error("failed to schedule now-playing message: %s", exc, exc_info=exc)
+
         try:
-            await interaction.followup.send(f"🎵 재생 중... {url}")
             tracks = await self.service.play_music(
                 guild_id,
                 interaction.user.voice.channel,
                 url,
                 loop=loop,
+                on_track_start=_on_track_started,
             )
 
-            # Show result
-            if len(tracks) == 1:
-                msg = f"✅ 재생 중: **{tracks[0].title}**"
-            else:
-                msg = f"✅ {len(tracks)}개 곡을 재생합니다"
+            # Queue summary for playlists (the actual "재생 중" message is sent
+            # by _on_track_started once the first track begins).
+            if len(tracks) > 1:
+                await interaction.followup.send(
+                    f"✅ 총 {len(tracks)}개 곡을 대기열에 추가했어요{loop_suffix}"
+                )
 
-            if loop:
-                msg += " (반복 모드)"
-
-            await interaction.followup.send(msg)
             log.info("play_music: %d tracks from %r (loop=%s)", len(tracks), url, loop)
 
         except YoutubeError as exc:

@@ -42,12 +42,20 @@ class FakeAudioManager:
         self._music = MusicPlayer("ffmpeg")
         self.return_tracks = return_tracks or []
         self.play_music_called_with: list[tuple] = []
+        self.on_track_start_called_with = None
         self.skip_called = False
         self.close_called = False
 
-    async def play_music(self, url: str, *, loop: bool = False) -> list[Track]:
+    async def play_music(
+        self,
+        url: str,
+        *,
+        loop: bool = False,
+        on_track_start=None,
+    ) -> list[Track]:
         """Mock play_music."""
         self.play_music_called_with.append((url, loop))
+        self.on_track_start_called_with = on_track_start
         # Return configured tracks
         return self.return_tracks
 
@@ -237,6 +245,33 @@ async def test_music_service_play_music_with_loop() -> None:
 
 
 @pytest.mark.asyncio
+async def test_music_service_play_music_forwards_on_track_start() -> None:
+    """play_music forwards on_track_start to the AudioManager."""
+    track = Track(url="http://example.com/1", title="Track 1")
+
+    def audio_factory():
+        return FakeAudioManager(return_tracks=[track])
+
+    voice_manager = FakeVoiceManager(audio_factory=audio_factory)
+    youtube = FakeYoutubeClient(tracks=[track])
+    service = MusicService(voice_manager, youtube, log_channel_id=0)
+
+    def on_track_start(_track) -> None:
+        pass
+
+    channel = Mock()
+    await service.play_music(
+        guild_id=12345,
+        user_channel=channel,
+        url="http://youtube.com/watch?v=123",
+        on_track_start=on_track_start,
+    )
+
+    connection = voice_manager.get_connection(12345)
+    assert connection.audio.on_track_start_called_with is on_track_start
+
+
+@pytest.mark.asyncio
 async def test_music_service_skip() -> None:
     """skip calls music player skip method."""
     track = Track(url="http://example.com/1", title="Track 1")
@@ -390,10 +425,15 @@ async def test_music_service_integration_playlist_loop() -> None:
         # Simulate what AudioManager.play_music should do
         original_play = audio.play_music
 
-        async def play_with_loop(url: str, *, loop: bool = False):
+        async def play_with_loop(
+            url: str,
+            *,
+            loop: bool = False,
+            on_track_start=None,
+        ):
             if loop:
                 audio._music.set_loop(True)
-            return await original_play(url, loop=loop)
+            return await original_play(url, loop=loop, on_track_start=on_track_start)
 
         audio.play_music = play_with_loop
         return audio
@@ -429,7 +469,7 @@ async def test_music_service_youtube_error() -> None:
     voice_manager = FakeVoiceManager()
 
     # Create a mock that raises error when play_music is called
-    async def failing_play(url: str, *, loop: bool = False):
+    async def failing_play(url: str, *, loop: bool = False, on_track_start=None):
         raise YoutubeError("Playback failed")
 
     def audio_factory():
@@ -456,7 +496,13 @@ async def test_music_service_voice_connection_failure() -> None:
     """play_music handles AudioManager errors gracefully."""
 
     class FailingAudioManager:
-        async def play_music(self, url: str, *, loop: bool = False) -> list[Track]:
+        async def play_music(
+            self,
+            url: str,
+            *,
+            loop: bool = False,
+            on_track_start=None,
+        ) -> list[Track]:
             raise Exception("Connection lost")
 
     class FailingVoiceManager:

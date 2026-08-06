@@ -38,10 +38,19 @@ def create_bot(prefix: str, *, sync_commands: bool = False) -> commands.Bot:
         help_command=None,
     )
 
+    synced = False
+
     @bot.event
     async def on_ready() -> None:
+        nonlocal synced
         log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
-        if sync_commands:
+        # Sync application commands exactly once per process. Re-running this on
+        # every websocket reconnect re-registers (and can churn) the global
+        # command definitions, which makes clients reject in-flight invocations
+        # with "This command is outdated" and burns Discord's per-day update
+        # budget (200 for global commands).
+        if sync_commands and not synced:
+            synced = True
             log.info("syncing %d application commands", len(bot.tree._get_all_commands()))
             await bot.tree.sync()
             log.info("application commands synced")

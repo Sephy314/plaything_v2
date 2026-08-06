@@ -6,7 +6,7 @@ without depending on Discord context or commands.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from core.exceptions import VoiceException, YoutubeError
 from core.logger import get_logger
@@ -46,6 +46,7 @@ class MusicService:
         url: str,
         *,
         loop: bool = False,
+        on_track_start: Callable[[Any], None] | None = None,
     ) -> list[Track]:
         """Extract and queue YouTube tracks, joining the user's voice channel.
 
@@ -54,6 +55,8 @@ class MusicService:
             user_channel: The voice channel the user is in.
             url: A YouTube video or playlist URL.
             loop: Repeat the current track when True.
+            on_track_start: Optional callback fired (from the voice playback
+                thread) whenever a track actually starts playing.
 
         Returns:
             The list of resolved :class:`Track` items.
@@ -73,7 +76,11 @@ class MusicService:
 
         # Play through AudioManager (handles TTS + music mixing)
         try:
-            tracks = await connection.audio.play_music(url, loop=loop)
+            tracks = await connection.audio.play_music(
+                url,
+                loop=loop,
+                on_track_start=on_track_start,
+            )
             log.info(
                 "music queued: %d tracks from %r in guild %s",
                 len(tracks),

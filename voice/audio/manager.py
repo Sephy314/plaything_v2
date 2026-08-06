@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
-from typing import Any
+from typing import Any, Callable
 
 from core.exceptions import PlaybackError, VoiceException
 from core.logger import get_logger
@@ -123,12 +123,20 @@ class AudioManager:
     # YouTube
     # ------------------------------------------------------------------
 
-    async def play_music(self, url: str, *, loop: bool = False) -> list[Any]:
+    async def play_music(
+        self,
+        url: str,
+        *,
+        loop: bool = False,
+        on_track_start: Callable[[Any], None] | None = None,
+    ) -> list[Any]:
         """Resolve and enqueue YouTube tracks, starting playback if needed.
 
         Args:
             url: A YouTube video or playlist URL.
             loop: Repeat the current track when True.
+            on_track_start: Optional callback fired (from the voice playback
+                thread) whenever a track actually starts playing.
 
         Returns:
             The resolved list of tracks.
@@ -138,6 +146,7 @@ class AudioManager:
         """
         tracks = await self._youtube.extract(url)
         self._music.set_loop(loop)
+        self._music.on_track_start = on_track_start
         for track in tracks:
             self._music.enqueue(track)
         self._attach_and_start("music")

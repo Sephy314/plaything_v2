@@ -44,14 +44,36 @@ class Track:
 
 
 class MusicPlayer:
-    """Plays a queue of :class:`Track` items via FFmpeg."""
+    """Plays a queue of :class:`Track` items via FFmpeg.
 
-    def __init__(self, ffmpeg: str) -> None:
+    Args:
+        ffmpeg: FFmpeg executable path/name.
+        on_track_start: Optional callback invoked (from the voice thread)
+            whenever a track actually starts playing.
+    """
+
+    def __init__(
+        self,
+        ffmpeg: str,
+        *,
+        on_track_start: Callable[[Track], None] | None = None,
+    ) -> None:
         self._ffmpeg = ffmpeg
         self._queue: deque[Track] = deque()
         self._current: FFmpegPcmSource | None = None
         self._current_track: Track | None = None
         self._loop = False
+        self._on_track_start = on_track_start
+
+    @property
+    def on_track_start(self) -> Callable[[Track], None] | None:
+        """Callback invoked when a track actually starts playing."""
+        return self._on_track_start
+
+    @on_track_start.setter
+    def on_track_start(self, callback: Callable[[Track], None] | None) -> None:
+        """Replace the track-start callback (safe to call from the async layer)."""
+        self._on_track_start = callback
 
     # ------------------------------------------------------------------
     # Queue controls (called from the async layer)
@@ -129,12 +151,26 @@ class MusicPlayer:
         try:
             self._current = self._open_source(track)
             log.info("youtube started: %s", track.title)
+            self._notify_track_started(track)
         except Exception as exc:  # invalid/deleted stream
             log.error("failed to open track %r: %s", track.title, exc, exc_info=exc)
             self._current = None
             self._current_track = None
             if not self._loop:
                 self._start_next()
+
+    def _notify_track_started(self, track: Track) -> None:
+        """Invoke the track-start callback, if set.
+
+        Called from the voice playback thread, so callers must schedule any
+        async work (e.g. sending a Discord message) onto the event loop.
+        """
+        if self._on_track_start is None:
+            return
+        try:
+            self._on_track_start(track)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.error("on_track_start callback failed for %r: %s", track.title, exc, exc_info=exc)
 
     def _open_source(self, track: Track) -> FFmpegPcmSource:
         return FFmpegPcmSource(

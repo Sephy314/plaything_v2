@@ -1,0 +1,8 @@
+{
+  "rules": [
+    {
+      "tool": "API Request Failed",
+      "action": "allow"
+    }
+  ]
+}

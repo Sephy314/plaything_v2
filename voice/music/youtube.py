@@ -7,6 +7,7 @@ Resolves a URL (single video or playlist) into a list of playable
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from core.exceptions import YoutubeError
@@ -14,6 +15,8 @@ from core.logger import get_logger
 from voice.music.player import Track
 
 log = get_logger(__name__)
+
+_SEARCH_PREFIX = re.compile(r"^ytsearch\d*:", re.IGNORECASE)
 
 _DEFAULT_OPTIONS: dict[str, Any] = {
     "format": "bestaudio/best",
@@ -23,6 +26,8 @@ _DEFAULT_OPTIONS: dict[str, Any] = {
     "ignoreerrors": True,
     "extract_flat": False,
 }
+
+_EXTRACT_ATTEMPTS = 3
 
 
 class YoutubeClient:
@@ -45,22 +50,34 @@ class YoutubeClient:
         """
         if not url or not url.strip():
             raise YoutubeError("Empty YouTube URL")
-        
+
         url_stripped = url.strip()
-        # Automatically convert search terms to ytsearch query
-        if not (url_stripped.startswith("http://") or url_stripped.startswith("https://") or url_stripped.startswith("ytsearch:")):
+        # Automatically convert search terms to a ytsearch query. Avoid
+        # double-prefixing values that already carry a ytsearchN: prefix, such
+        # as the autocomplete presets ("ytsearch1:...").
+        if not (
+            url_stripped.startswith(("http://", "https://"))
+            or _SEARCH_PREFIX.match(url_stripped)
+        ):
             url_stripped = f"ytsearch1:{url_stripped}"
 
         loop = asyncio.get_running_loop()
-        try:
-            tracks = await loop.run_in_executor(None, self._extract_sync, url_stripped)
-        except YoutubeError:
-            raise
-        except Exception as exc:
-            raise YoutubeError(f"Failed to resolve YouTube URL: {exc}") from exc
-        if not tracks:
-            raise YoutubeError("No playable audio found for the given URL")
-        return tracks
+        # YouTube intermittently throttles / bot-walls requests, returning
+        # entries without a playable stream URL. Retry with a short backoff so
+        # transient failures do not surface to the user as hard errors.
+        last_error: YoutubeError | None = None
+        for attempt in range(_EXTRACT_ATTEMPTS):
+            try:
+                tracks = await loop.run_in_executor(None, self._extract_sync, url_stripped)
+                if tracks:
+                    return tracks
+            except YoutubeError as exc:
+                last_error = exc
+            if attempt + 1 < _EXTRACT_ATTEMPTS:
+                await asyncio.sleep(1.5 * (attempt + 1))
+        if last_error is not None:
+            raise last_error
+        raise YoutubeError("No playable audio found for the given URL")
 
     def _extract_sync(self, url: str) -> list[Track]:
         import yt_dlp  # type: ignore[import-not-found]  # noqa: PLC0415
@@ -76,14 +93,37 @@ class YoutubeClient:
 
         entries = info.get("entries")
         if entries is not None:
-            tracks = [track for entry in entries if (track := self._to_track(entry))]
+            tracks = [track for entry in entries if (track := self._resolve_entry(entry))]
             if not tracks:
                 raise YoutubeError("No playable entries found in the playlist")
             return tracks
-        track = self._to_track(info)
+        track = self._resolve_entry(info)
         if track is None:
             raise YoutubeError("Unable to build a playable track")
         return [track]
+
+    def _resolve_entry(self, info: dict[str, Any] | None) -> Track | None:
+        """Build a playable :class:`Track` from an extraction entry.
+
+        A search/playlist entry can come back "flat" (no stream URL) when
+        YouTube throttles the request. In that case fall back to re-extracting
+        the entry by its video page URL before giving up on it.
+        """
+        track = self._to_track(info)
+        if track is not None:
+            return track
+        source = (info or {}).get("webpage_url") or (info or {}).get("original_url")
+        if not source:
+            return None
+        try:
+            import yt_dlp  # type: ignore[import-not-found]  # noqa: PLC0415
+
+            with yt_dlp.YoutubeDL(self._options) as ydl:
+                detail = ydl.extract_info(source, download=False)
+            return self._to_track(detail)
+        except Exception as exc:
+            log.warning("failed to re-extract track %r: %s", source, exc)
+            return None
 
     @staticmethod
     def _to_track(info: dict[str, Any] | None) -> Track | None:
