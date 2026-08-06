@@ -59,6 +59,7 @@ class AudioManager:
 
         self._tts_pending: asyncio.Queue[tuple[str, str, str]] = asyncio.Queue()
         self._tts_worker: asyncio.Task | None = None
+        self._play_task: asyncio.Task | None = None
         self._started = False
 
     # ------------------------------------------------------------------
@@ -132,6 +133,10 @@ class AudioManager:
     ) -> list[Any]:
         """Resolve and enqueue YouTube tracks, starting playback if needed.
 
+        The (potentially slow) playlist/video fetch runs as a tracked task so
+        it can be interrupted by :meth:`stop` (e.g. a ``/나가`` while the
+        playlist is still being fetched).
+
         Args:
             url: A YouTube video or playlist URL.
             loop: Repeat the current track when True.
@@ -143,6 +148,32 @@ class AudioManager:
 
         Raises:
             YoutubeError: If the URL cannot be resolved.
+        """
+        # Cancel any previous play that is still resolving (e.g. a long
+        # playlist fetch), so only the latest request drives playback.
+        self._cancel_play_task()
+
+        task = asyncio.create_task(
+            self._resolve_and_enqueue(url, loop=loop, on_track_start=on_track_start)
+        )
+        self._play_task = task
+        try:
+            return await task
+        finally:
+            if self._play_task is task:
+                self._play_task = None
+
+    async def _resolve_and_enqueue(
+        self,
+        url: str,
+        *,
+        loop: bool,
+        on_track_start: Callable[[Any], None] | None,
+    ) -> list[Any]:
+        """Extract YouTube tracks, enqueue them and start streaming.
+
+        Runs as a tracked task so it can be cancelled by :meth:`stop` while
+        the extraction (the slow part) is still in flight.
         """
         tracks = await self._youtube.extract(url)
         self._music.set_loop(loop)
@@ -174,6 +205,7 @@ class AudioManager:
 
     def stop(self) -> None:
         """Stop all playback, clear queues and detach sources."""
+        self._cancel_play_task()
         self._stop_tts_worker()
         self._drain_tts_pending()
         self._music.close()
@@ -203,6 +235,17 @@ class AudioManager:
         elif channel == "tts":
             self._mixer.attach_tts(self._tts)
         self._start_streaming()
+
+    def _cancel_play_task(self) -> None:
+        """Cancel an in-flight play (e.g. a playlist fetch), if any.
+
+        Called from :meth:`stop` so a ``/나가`` immediately interrupts a
+        request that is still being fetched instead of letting it finish in
+        the background.
+        """
+        if self._play_task is not None and not self._play_task.done():
+            self._play_task.cancel()
+        self._play_task = None
 
     def _start_streaming(self) -> None:
         if self._started:

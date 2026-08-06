@@ -459,6 +459,44 @@ async def test_music_service_integration_playlist_loop() -> None:
 
 
 # ============================================================================
+# AudioManager Cancellation Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_audio_manager_stop_cancels_in_flight_play() -> None:
+    """stop() cancels a play that is still being fetched (e.g. long playlist)."""
+    from voice.audio.manager import AudioManager
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowYoutubeClient:
+        async def extract(self, url: str) -> list[Track]:
+            started.set()
+            await release.wait()
+            return [Track(url="http://example.com/1", title="Track 1")]
+
+    vc = Mock()
+    vc.is_connected.return_value = True
+
+    audio = AudioManager(vc, youtube=SlowYoutubeClient())
+    play_task = asyncio.create_task(audio.play_music("http://example.com/playlist"))
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    # Simulate /나가 while the playlist is still being fetched.
+    audio.stop()
+
+    with pytest.raises(asyncio.CancelledError):
+        await play_task
+
+    # The fetch was interrupted: nothing was enqueued or streamed.
+    assert audio._music.queue_size == 0
+    assert audio._music.current_title is None
+    vc.play.assert_not_called()
+
+
+# ============================================================================
 # Error Handling Tests
 # ============================================================================
 
