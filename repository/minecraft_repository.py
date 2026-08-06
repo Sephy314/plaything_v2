@@ -61,6 +61,11 @@ class MinecraftRepository:
         query = f"SELECT {_SERVER_COLUMNS} FROM minecraft_servers WHERE port = $1"
         return await self._fetch_server(query, port)
 
+    async def find_server_by_folder(self, folder_path: str) -> MinecraftServer | None:
+        """Fetch a server owning the given folder path."""
+        query = f"SELECT {_SERVER_COLUMNS} FROM minecraft_servers WHERE folder_path = $1"
+        return await self._fetch_server(query, folder_path)
+
     async def register_server(
         self,
         alias: str,
@@ -138,6 +143,18 @@ class MinecraftRepository:
             "WHERE minecraft_uuid = $1"
         )
         return await self._fetch_user(query, minecraft_uuid)
+
+    async def list_users(self) -> list[MinecraftUser]:
+        """Return every registered Discord↔UUID mapping, ordered by Discord id.
+
+        Used when importing an external server folder so all registered
+        members can be applied to the new server's whitelist and OP list.
+        """
+        query = (
+            "SELECT discord_id, minecraft_uuid, created_at FROM minecraft_users "
+            "ORDER BY discord_id"
+        )
+        return await self._fetch_users(query)
 
     # ---- Player sessions -------------------------------------------------
 
@@ -223,3 +240,10 @@ class MinecraftRepository:
         except asyncpg.PostgresError as exc:
             raise DatabaseException("Failed to fetch minecraft user") from exc
         return MinecraftUser.from_row(row) if row else None
+
+    async def _fetch_users(self, query: str) -> list[MinecraftUser]:
+        try:
+            rows = await self._db.fetch(query)
+        except asyncpg.PostgresError as exc:
+            raise DatabaseException("Failed to list minecraft users") from exc
+        return [MinecraftUser.from_row(row) for row in rows]

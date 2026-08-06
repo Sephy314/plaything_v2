@@ -25,6 +25,7 @@ from config.settings import Settings
 from core.exceptions import (
     MinecraftAliasExists,
     MinecraftFolderError,
+    MinecraftFolderNotFound,
     MinecraftPermissionError,
     MinecraftPortConflict,
     MinecraftProcessError,
@@ -160,6 +161,108 @@ class MinecraftService:
             server.folder_path,
         )
         return server
+
+    async def migrate_external_folder(
+        self, alias: str, port: int | None, created_by: int
+    ) -> MinecraftServer:
+        """Import an existing external server folder as a managed server.
+
+        Unlike :meth:`register_server` this does *not* create a new folder —
+        the folder must already exist on disk (e.g. a map/server folder
+        dropped into ``MC_PARENT_DIRECTORY``). The folder is registered in
+        PostgreSQL and every registered Discord↔UUID member is applied to the
+        folder's whitelist and OP list so the existing whitelist / admin
+        configuration carries over to the migrated server.
+
+        Args:
+            alias: Unique server alias (must equal the folder name under the
+                parent directory).
+            port: Requested port, or ``None`` to read it from the folder's
+                ``server.properties`` (falling back to auto-discovery).
+            created_by: Discord id of the migrating user.
+
+        Raises:
+            MinecraftAliasExists: If the alias or folder is already managed.
+            MinecraftFolderNotFound: If no matching folder exists on disk.
+            MinecraftPortConflict: If the resolved port is out of range or
+                already assigned to another managed server.
+        """
+        self._validate_alias(alias)
+
+        existing = await self._repository.find_server_by_alias(alias)
+        if existing is not None:
+            raise MinecraftAliasExists(f"Alias '{alias}' is already in use")
+
+        parent = self._parent_directory()
+        folder = parent / alias
+        if not folder.is_dir():
+            raise MinecraftFolderNotFound(
+                f"외부 서버 폴더를 찾을 수 없습니다: {folder} "
+                "(폴더를 MC_PARENT_DIRECTORY 아래에 두어야 합니다)"
+            )
+
+        existing_by_folder = await self._repository.find_server_by_folder(str(folder))
+        if existing_by_folder is not None:
+            raise MinecraftAliasExists(
+                f"이미 등록된 폴더입니다: {folder} (서버 '{existing_by_folder.alias}')"
+            )
+
+        # Resolve the port: explicit argument > folder's server.properties > free port.
+        if port is None:
+            port = self._read_server_port(folder)
+        if port is None:
+            port = await self._find_free_port()
+        else:
+            self._validate_port(port)
+            start, end = self._port_range()
+            if not start <= port <= end:
+                raise MinecraftPortConflict(
+                    f"Port {port} is outside the published range {start}-{end}"
+                )
+            conflict = await self._repository.find_server_by_port(port)
+            if conflict is not None:
+                raise MinecraftPortConflict(
+                    f"Port {port} is already in use by another server"
+                )
+
+        server = await self._repository.register_server(alias, str(folder), port, created_by)
+        try:
+            self._patch_external_properties(folder, alias)
+            await self._sync_whitelist_and_ops(server)
+        except Exception as exc:  # pragma: no cover - defensive
+            # The row is already registered; log the post-setup failure instead
+            # of rolling the import back entirely.
+            log.warning(
+                "post-migration setup failed for %s: %s", alias, exc, exc_info=exc
+            )
+
+        log.info(
+            "External server folder migrated: alias=%s port=%s folder=%s created_by=%s",
+            server.alias,
+            server.port,
+            server.folder_path,
+            created_by,
+        )
+        return server
+
+    async def available_external_folders(self) -> list[str]:
+        """Return folder names under ``MC_PARENT_DIRECTORY`` not yet managed.
+
+        Used by the command-layer autocomplete so admins can pick which
+        external folder to migrate.
+        """
+        try:
+            parent = self._parent_directory()
+        except MinecraftFolderError:
+            return []
+        if not parent.is_dir():
+            return []
+        registered = {s.folder_path for s in await self._repository.list_servers()}
+        names = []
+        for entry in sorted(parent.iterdir(), key=lambda p: p.name.lower()):
+            if entry.is_dir() and str(entry) not in registered:
+                names.append(entry.name)
+        return names
 
     async def start(self, alias: str) -> MinecraftServer:
         """Start a server by alias."""
@@ -753,11 +856,11 @@ class MinecraftService:
         # Remove common RCON prefixes like "[HH:MM:SS INFO]: "
         if line.startswith("[") and "]: " in line:
             line = line.split("]: ", 1)[-1]
-        
+
         # Extract player count
         match = re.search(r"(\d+)/\d+ players online", line)
         count = int(match.group(1)) if match else 0
-        
+
         # Extract player names (everything after "online: ")
         names: list[str] = []
         if " online: " in line:
@@ -769,7 +872,7 @@ class MinecraftService:
     async def _rcon_exec(self, server: MinecraftServer, command: str) -> str:
         host = self._settings.mc_rcon_host
         port, password = self._rcon_connection_details(server)
-        
+
         # Retry logic for RCON connections (server may still be initializing)
         max_retries = 3
         last_error = None
@@ -786,7 +889,7 @@ class MinecraftService:
                 if attempt < max_retries - 1:
                     # Wait before retrying (exponential backoff)
                     await asyncio.sleep(2 ** attempt)
-        
+
         raise MinecraftRconError(f"RCON failed for '{server.alias}': {last_error}") from last_error
 
     def _rcon_port_for_port(self, port: int) -> int:
@@ -844,6 +947,12 @@ class MinecraftService:
         except ValueError:
             return None
 
+    @classmethod
+    def _read_server_port(cls, folder: Path) -> int | None:
+        """Read the ``server-port`` from a folder's ``server.properties``."""
+        props = cls._load_server_properties(folder)
+        return cls._parse_int(props.get("server-port"))
+
     async def _is_op(self, server: MinecraftServer, discord_id: int) -> bool:
         user = await self._repository.find_user_by_discord(discord_id)
         if user is None:
@@ -897,6 +1006,107 @@ class MinecraftService:
             {"uuid": minecraft_uuid, "name": ""},
         )
 
+    def _patch_external_properties(self, folder: Path, alias: str) -> None:
+        """Enable RCON and whitelist enforcement on an imported folder.
+
+        Only updates the RCON / whitelist keys, preserving the rest of the
+        folder's existing ``server.properties`` (``server-port``, ``motd``,
+        ``online-mode``, ...). If the file is missing, the standard bootstrap
+        (``_ensure_static_files``) writes a full default one on first start.
+        """
+        path = folder / "server.properties"
+        if not path.exists():
+            return
+
+        rcon_port = self._rcon_port_for_port(self._read_server_port(folder) or DEFAULT_PORT)
+        password = self._rcon_password_for_alias(alias)
+        values = {
+            "enable-rcon": "true",
+            "rcon.port": str(rcon_port),
+            "rcon.password": password,
+            "white-list": "true",
+            "enforce-whitelist": "true",
+        }
+
+        lines: list[str] = []
+        seen: set[str] = set()
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                lines.append(raw)
+                continue
+            key = stripped.split("=", 1)[0].strip()
+            if key in values:
+                if key not in seen:
+                    lines.append(f"{key}={values[key]}")
+                    seen.add(key)
+                continue
+            lines.append(raw)
+        for key, value in values.items():
+            if key not in seen:
+                lines.append(f"{key}={value}")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (folder / ".rcon_password").write_text(password, encoding="utf-8")
+
+    async def _sync_whitelist_and_ops(self, server: MinecraftServer) -> None:
+        """Apply every registered Discord↔UUID member to the server's lists.
+
+        Merges into the folder's existing ``whitelist.json`` / ``ops.json``,
+        deduplicating by UUID so members are never duplicated when a server
+        is migrated more than once.
+        """
+        users = await self._repository.list_users()
+        if not users:
+            log.info("no registered members to apply to migrated server %s", server.alias)
+            return
+
+        folder = Path(server.folder_path)
+        whitelist = _load_json_list(folder / "whitelist.json")
+        ops = _load_json_list(folder / "ops.json")
+        whitelist_uuids = {
+            self._normalize_uuid(e.get("uuid"))
+            for e in whitelist
+            if isinstance(e, dict) and self._normalize_uuid(e.get("uuid"))
+        }
+        op_uuids = {
+            self._normalize_uuid(e.get("uuid"))
+            for e in ops
+            if isinstance(e, dict) and self._normalize_uuid(e.get("uuid"))
+        }
+
+        added_whitelist = 0
+        added_ops = 0
+        for user in users:
+            normalized = self._normalize_uuid(user.minecraft_uuid)
+            if not normalized:
+                continue
+            if normalized not in whitelist_uuids:
+                whitelist.append({"uuid": user.minecraft_uuid, "name": ""})
+                whitelist_uuids.add(normalized)
+                added_whitelist += 1
+            if normalized not in op_uuids:
+                ops.append(
+                    {
+                        "uuid": user.minecraft_uuid,
+                        "name": "",
+                        "level": 4,
+                        "bypassesPlayerLimit": True,
+                    }
+                )
+                op_uuids.add(normalized)
+                added_ops += 1
+
+        if added_whitelist:
+            _write_json_list(folder / "whitelist.json", whitelist)
+        if added_ops:
+            _write_json_list(folder / "ops.json", ops)
+        log.info(
+            "whitelist/ops synced for migrated server: alias=%s added_whitelist=%s added_ops=%s",
+            server.alias,
+            added_whitelist,
+            added_ops,
+        )
+
     # ------------------------------------------------------------------
     # Ports / cleanup
     # ------------------------------------------------------------------
@@ -947,3 +1157,19 @@ def _append_json_entry(path: Path, entry: dict[str, Any]) -> None:
         data = []
     data.append(entry)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _load_json_list(path: Path) -> list[Any]:
+    """Load a JSON-list file, tolerating missing/corrupt content."""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _write_json_list(path: Path, entries: list[Any]) -> None:
+    """Write a JSON-list file with indentation."""
+    path.write_text(json.dumps(entries, indent=2), encoding="utf-8")

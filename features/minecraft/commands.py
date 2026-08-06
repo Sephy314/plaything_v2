@@ -19,6 +19,7 @@ from discord.ext.commands import Bot
 from core.exceptions import (
     MinecraftAliasExists,
     MinecraftFolderError,
+    MinecraftFolderNotFound,
     MinecraftPermissionError,
     MinecraftPortConflict,
     MinecraftProcessError,
@@ -42,7 +43,7 @@ def _contains_match(text: str, current: str) -> bool:
     """Check if text matches current input (case-insensitive, partial match)."""
     current_lower = current.lower()
     text_lower = text.lower()
-    
+
     # Exact prefix match
     if text_lower.startswith(current_lower):
         return True
@@ -59,32 +60,32 @@ async def server_autocomplete(
     """Autocomplete for server alias parameter."""
     try:
         from core.container import container, get_container
-        
+
         # Handle both initialized and uninitialized container
         try:
             service = container.minecraft_service if container else None
-        except:
+        except Exception:
             service = None
-        
+
         if not service:
             try:
                 service = get_container().minecraft_service
             except RuntimeError:
                 # Container not yet initialized
                 return []
-        
+
         servers = await service.list_servers()
-        
+
         # Filter with both prefix and partial matching
         filtered = [s.alias for s in servers if _contains_match(s.alias, current)]
-        
+
         # Create choices
         choices = []
         for alias in filtered[:25]:
             server = next((s for s in servers if s.alias == alias), None)
             if not server:
                 continue
-                
+
             from features.minecraft.models import STATUS_RUNNING
             status_str = "🟢 실행중" if server.status == STATUS_RUNNING else "🔴 정지"
             choices.append(
@@ -93,7 +94,7 @@ async def server_autocomplete(
                     value=alias,
                 )
             )
-        
+
         return choices
     except Exception as e:
         log.error("server_autocomplete failed: %s", e, exc_info=True)
@@ -108,25 +109,25 @@ async def server_running_autocomplete(
     try:
         from core.container import container, get_container
         from features.minecraft.models import STATUS_RUNNING
-        
+
         # Handle both initialized and uninitialized container
         try:
             service = container.minecraft_service if container else None
-        except:
+        except Exception:
             service = None
-        
+
         if not service:
             try:
                 service = get_container().minecraft_service
             except RuntimeError:
                 return []
-        
+
         servers = await service.list_servers()
         running = [s for s in servers if s.status == STATUS_RUNNING]
-        
+
         # Filter by current input
         filtered = [s.alias for s in running if _contains_match(s.alias, current)]
-        
+
         return [
             app_commands.Choice(name=alias, value=alias)
             for alias in filtered[:25]
@@ -145,13 +146,13 @@ async def scope_autocomplete(
         app_commands.Choice(name="external (외부/기본)", value="external"),
         app_commands.Choice(name="internal (내부)", value="internal"),
     ]
-    
+
     if not current:
         return scopes
-    
+
     current_lower = current.lower()
     return [
-        s for s in scopes 
+        s for s in scopes
         if s.name.lower().startswith(current_lower) or s.value.lower().startswith(current_lower)
     ]
 
@@ -165,15 +166,44 @@ async def whitelist_action_autocomplete(
         app_commands.Choice(name="add (추가)", value="add"),
         app_commands.Choice(name="remove (제거)", value="remove"),
     ]
-    
+
     if not current:
         return actions
-    
+
     current_lower = current.lower()
     return [
-        a for a in actions 
+        a for a in actions
         if a.name.lower().startswith(current_lower) or a.value.lower().startswith(current_lower)
     ]
+
+
+async def external_folder_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for unmanaged external server folders under MC_PARENT_DIRECTORY."""
+    try:
+        from core.container import container, get_container
+
+        try:
+            service = container.minecraft_service if container else None
+        except Exception:
+            service = None
+        if not service:
+            try:
+                service = get_container().minecraft_service
+            except RuntimeError:
+                return []
+
+        names = await service.available_external_folders()
+        filtered = [n for n in names if _contains_match(n, current)]
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in filtered[:25]
+        ]
+    except Exception as e:
+        log.error("external_folder_autocomplete failed: %s", e, exc_info=True)
+        return []
 
 
 class MinecraftCog(FeatureCog):
@@ -313,7 +343,9 @@ class MinecraftCog(FeatureCog):
             return
 
         if not servers:
-            await interaction.followup.send("등록된 서버가 없습니다. `/마크_생성`으로 만들어 주세요.")
+            await interaction.followup.send(
+                "등록된 서버가 없습니다. `/마크_생성`으로 만들어 주세요."
+            )
             return
 
         from features.minecraft.models import STATUS_RUNNING
@@ -342,7 +374,9 @@ class MinecraftCog(FeatureCog):
     # RCON
     # ------------------------------------------------------------------
 
-    @app_commands.command(name="마크_명령어", description="서버에 RCON 명령어를 실행합니다. (OP 권한 필요)")
+    @app_commands.command(
+        name="마크_명령어", description="서버에 RCON 명령어를 실행합니다. (OP 권한 필요)"
+    )
     @app_commands.describe(alias="서버 별명", command="실행할 명령어")
     @app_commands.autocomplete(alias=server_running_autocomplete)
     async def mc_command(
@@ -418,7 +452,49 @@ class MinecraftCog(FeatureCog):
             await self._handle_error(interaction, exc)
             return
         verb = "추가" if action == "add" else "제거"
-        await interaction.followup.send(f"화이트리스트 {verb} 완료: **{nickname}**\n```{output[:500]}```")
+        await interaction.followup.send(
+            f"화이트리스트 {verb} 완료: **{nickname}**\n```{output[:500]}```"
+        )
+
+    # ------------------------------------------------------------------
+    # External server folder migration (admin-only)
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="마크_맵가져오기",
+        description="외부 서버 폴더를 가져와 관리 서버로 등록합니다. (관리자)",
+    )
+    @app_commands.describe(
+        alias="MC_PARENT_DIRECTORY 안에 있는 외부 서버 폴더명",
+        port="포트 번호 (선택사항, 기본값: server.properties에서 읽음)",
+    )
+    @app_commands.autocomplete(alias=external_folder_autocomplete)
+    @app_commands.default_permissions(administrator=True)
+    async def mc_import_map(
+        self,
+        interaction: discord.Interaction,
+        alias: str,
+        port: int | None = None,
+    ) -> None:
+        """Register an existing external server folder as a managed server.
+
+        The folder must already exist under ``MC_PARENT_DIRECTORY``. On
+        success it is registered in PostgreSQL, and every registered
+        Discord↔UUID member is applied to the folder's whitelist and OP list.
+        """
+        await interaction.response.defer()
+        try:
+            server = await self._service.migrate_external_folder(
+                alias.strip(), port, interaction.user.id
+            )
+        except Exception as exc:
+            await self._handle_error(interaction, exc)
+            return
+        await interaction.followup.send(
+            f"외부 서버 폴더 등록 완료: **{server.alias}** (포트 {server.port}, "
+            f"폴더 `{server.folder_path}`)\n"
+            "등록된 모든 유저가 화이트리스트/OP에 반영되었습니다."
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -447,7 +523,7 @@ class MinecraftCog(FeatureCog):
             MinecraftPermissionError: "이 서버에서 OP 권한이 없습니다.",
             MinecraftUnauthorized: "권한이 없거나 입력이 올바르지 않습니다.",
         }
-        if isinstance(exc, MinecraftPortConflict):
+        if isinstance(exc, (MinecraftPortConflict, MinecraftFolderNotFound)):
             log.warning("minecraft command rejected: %s", exc)
             await interaction.followup.send(f"⚠️ {exc}")
             return
