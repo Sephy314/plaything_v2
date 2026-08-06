@@ -6,7 +6,9 @@ Emits logs to three destinations:
 * Rotating file
 * Discord channel (asynchronously, via a queue drained by the bot)
 
-The logger is exposed as a singleton through :func:`get_logger`.
+Structured operational events (e.g. ``"Bot Ready"``, ``"Meal Fetch Success"``)
+can be emitted through :func:`log_event`; they are rendered as rich embeds in
+the Discord log channel.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from logging.handlers import RotatingFileHandler
 import structlog
 
 from config.settings import PROJECT_ROOT
+from core.discord_handler import DiscordLogHandler
 
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_FILE = LOG_DIR / "bot.log"
@@ -28,26 +31,7 @@ LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 _configured = False
 
 
-class DiscordLogHandler(logging.Handler):
-    """Forward log records to an asyncio queue for external consumption.
-
-    The consumer is provided at construction time and is responsible for
-    posting messages to a Discord channel.
-    """
-
-    def __init__(self, queue: asyncio.Queue[str]) -> None:
-        super().__init__(level=logging.INFO)
-        self._queue = queue
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            message = self.format(record)
-            self._queue.put_nowait(message)
-        except Exception:  # pragma: no cover - defensive
-            self.handleError(record)
-
-
-def _build_handlers(queue: asyncio.Queue[str] | None) -> list[logging.Handler]:
+def _build_handlers(queue: asyncio.Queue | None) -> list[logging.Handler]:
     """Construct the stream/file/discord handlers for a logger."""
     formatter = logging.Formatter(LOG_FORMAT)
 
@@ -69,9 +53,10 @@ def _build_handlers(queue: asyncio.Queue[str] | None) -> list[logging.Handler]:
     handlers.append(file_handler)
 
     if queue is not None:
+        # The Discord handler renders the raw message into an embed itself, so
+        # it intentionally keeps the default formatter (message only).
         discord_handler = DiscordLogHandler(queue)
         discord_handler.setLevel(logging.INFO)
-        discord_handler.setFormatter(formatter)
         handlers.append(discord_handler)
 
     journal_handler = _build_journal_handler()
@@ -140,26 +125,27 @@ def get_logger(name: str = "plaything") -> Logger:
     return logging.getLogger(name)
 
 
-def async_logger_consumer(
-    queue: asyncio.Queue[str],
-    post: callable,
-) -> asyncio.Task:
-    """Create a background task that drains log messages and posts them.
+def log_event(
+    logger: Logger,
+    event: str,
+    *,
+    level: int = logging.INFO,
+    **details: object,
+) -> None:
+    """Emit a structured operational event (rendered as a Discord embed).
+
+    The event name becomes the embed title and ``details`` are shown in the
+    embed "Details" field. The record is also written to console/file through
+    the normal handlers.
 
     Args:
-        queue: Queue of formatted log messages.
-        post: Coroutine callback accepting a single string message.
-
-    Returns:
-        An asyncio task draining the queue.
+        logger: Logger to emit through (all destinations).
+        event: Human-readable event name, e.g. ``"Minecraft Server Started"``.
+        level: Logging level for the event.
+        **details: Key/value pairs shown in the embed "Details" field.
     """
-
-    async def _drain() -> None:
-        while True:
-            message = await queue.get()
-            try:
-                await post(message)
-            finally:
-                queue.task_done()
-
-    return asyncio.create_task(_drain(), name="discord-log-consumer")
+    logger.log(
+        level,
+        event,
+        extra={"log_event": event, "log_details": details or None},
+    )

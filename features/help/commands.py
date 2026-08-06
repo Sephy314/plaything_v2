@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 import discord
 from discord import app_commands
 from discord.ext.commands import Bot
@@ -105,12 +103,12 @@ HELP_DATA = {
             {
                 "name": "/급식",
                 "args": "",
-                "description": "오늘의 급식 정보를 표시합니다.",
+                "description": "오늘의 급식을 조회·출력합니다. (디버깅/통합 테스트)",
             },
             {
                 "name": "/급식날짜",
                 "args": "[년도] [월] [일]",
-                "description": "특정 날짜의 급식을 표시합니다.",
+                "description": "특정 날짜의 급식을 조회·출력합니다. (디버깅/통합 테스트)",
             },
         ],
     },
@@ -150,10 +148,7 @@ async def category_autocomplete(
     """Autocomplete for help category."""
     categories = list(HELP_DATA.keys())
     filtered = [c for c in categories if c.lower().startswith(current.lower())]
-    return [
-        app_commands.Choice(name=cat, value=cat)
-        for cat in filtered
-    ]
+    return [app_commands.Choice(name=cat, value=cat) for cat in filtered]
 
 
 class HelpCog(FeatureCog):

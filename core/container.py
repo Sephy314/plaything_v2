@@ -12,6 +12,8 @@ from config.settings import Settings
 from core.database import Database
 from core.logger import get_logger
 from core.scheduler import Scheduler
+from features.meal.scheduler import MealScheduler
+from features.meal.service import MealService
 from repository.minecraft_repository import MinecraftRepository
 from repository.tts_voice_repository import TTSVoiceRepository
 from repository.user_repository import UserRepository
@@ -34,7 +36,7 @@ class Container:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.database = Database(settings.database_dsn)
-        self.scheduler = Scheduler()
+        self.scheduler = Scheduler(timezone=settings.timezone)
 
         self.user_repository = UserRepository(self.database)
         self.voice_repository = VoiceRepository(self.database)
@@ -45,6 +47,13 @@ class Container:
         self.voice_service = VoiceService(self.voice_repository)
         self.minecraft_service = MinecraftService(self.minecraft_repository, settings)
         self.tts_voice_service = TTSVoiceService(self.tts_voice_repository)
+
+        self.meal_service = MealService(settings.meal_url)
+        self.meal_scheduler = MealScheduler(
+            self.scheduler,
+            self.meal_service,
+            timezone=settings.timezone,
+        )
 
         self.youtube = YoutubeClient()
         self.tts_providers = ProviderRegistry()
@@ -65,6 +74,16 @@ class Container:
             ffmpeg=self.settings.ffmpeg_executable,
             audio_factory=self._build_audio,
         )
+        self.meal_service.channel_provider = self._meal_channel_provider
+
+    def _meal_channel_provider(self):
+        """Return the channel for meal output, or ``None`` if unavailable."""
+        if self.bot is None:
+            return None
+        channel_id = self.settings.meal_channel_id or self.settings.log_channel_id
+        if not channel_id:
+            return None
+        return self.bot.get_channel(channel_id)
 
     def _build_audio(self, voice_client: Any) -> AudioManager:
         """Construct an :class:`AudioManager` bound to a voice client.
