@@ -1,11 +1,18 @@
-"""Discord bot construction and lifecycle helpers."""
+"""Discord bot construction and lifecycle helpers.
+
+Lifecycle events (ready / reconnect / disconnect / exceptions) are emitted as
+structured log events so they appear in the Discord log channel as embeds.
+"""
 
 from __future__ import annotations
+
+import logging
+from collections.abc import Awaitable, Callable
 
 from discord import Intents
 from discord.ext import commands
 
-from core.logger import get_logger
+from core.logger import get_logger, log_event
 
 log = get_logger(__name__)
 
@@ -22,12 +29,20 @@ def build_intents() -> Intents:
     return intents
 
 
-def create_bot(prefix: str, *, sync_commands: bool = False) -> commands.Bot:
+def create_bot(
+    prefix: str,
+    *,
+    sync_commands: bool = False,
+    on_ready: Callable[[], Awaitable[None]] | None = None,
+) -> commands.Bot:
     """Create and configure the bot instance.
 
     Args:
         prefix: Command prefix, e.g. ``"!"``.
         sync_commands: If True, sync application commands on startup.
+        on_ready: Optional coroutine invoked once after the bot becomes ready
+            (used, for example, to start the scheduler — Bot Ready → Scheduler
+            Start).
 
     Returns:
         A configured :class:`commands.Bot`.
@@ -38,12 +53,25 @@ def create_bot(prefix: str, *, sync_commands: bool = False) -> commands.Bot:
         help_command=None,
     )
 
+    # Capture the on_ready callback BEFORE the event handler below is bound to
+    # the same name. Otherwise ``on_ready`` inside the handler resolves to the
+    # handler itself and ``await on_ready()`` recurses forever.
+    ready_callback = on_ready
+
     synced = False
 
     @bot.event
     async def on_ready() -> None:
         nonlocal synced
-        log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
+        user = bot.user
+        log_event(
+            log,
+            "Bot Ready",
+            details={
+                "user": str(user) if user else "unknown",
+                "id": str(user.id) if user else "?",
+            },
+        )
         # Sync application commands exactly once per process. Re-running this on
         # every websocket reconnect re-registers (and can churn) the global
         # command definitions, which makes clients reject in-flight invocations
@@ -54,6 +82,26 @@ def create_bot(prefix: str, *, sync_commands: bool = False) -> commands.Bot:
             log.info("syncing %d application commands", len(bot.tree._get_all_commands()))
             await bot.tree.sync()
             log.info("application commands synced")
+        if ready_callback is not None:
+            await ready_callback()
+
+    @bot.event
+    async def on_resumed() -> None:
+        log_event(log, "Bot Reconnected", level=logging.WARNING)
+
+    @bot.event
+    async def on_disconnect() -> None:
+        log_event(log, "Bot Disconnected", level=logging.WARNING)
+
+    @bot.event
+    async def on_error(event_method: str, *args, **kwargs) -> None:
+        error = args[0] if args else None
+        log_event(
+            log,
+            "Bot Exception",
+            level=logging.ERROR,
+            details={"event": event_method, "error": str(error) if error else "unknown"},
+        )
 
     @bot.event
     async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:

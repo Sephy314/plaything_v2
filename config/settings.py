@@ -31,7 +31,15 @@ class Settings(BaseSettings):
 
     database_dsn: str = Field(..., description="PostgreSQL connection string")
     discord_token: str = Field(..., description="Discord bot token")
-    meal_url: str = Field("", description="Meal API URL (unused in this stage)")
+    meal_url: str = Field("", description="NEIS meal API URL (mealServiceDietInfo base)")
+    meal_channel_id: int = Field(
+        0,
+        description="Discord channel id for the daily meal output (0 = fall back to LOG_CHANNEL_ID)",
+    )
+    timezone: str = Field(
+        "Asia/Seoul",
+        description="Primary timezone used by the scheduler and log timestamps",
+    )
     mc_parent_directory: str = Field("", description="Minecraft server parent directory")
     mc_port_start: int = Field(25565, description="First Minecraft port (published range)")
     mc_port_end: int = Field(25620, description="Last Minecraft port (published range)")

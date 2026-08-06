@@ -12,7 +12,10 @@ log = get_logger(__name__)
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Do NOT disable existing loggers: alembic.ini only knows about its own
+    # loggers, and the default ``disable_existing_loggers=True`` would silence
+    # every application logger (bot.main, core.*, ...) once a migration runs.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
