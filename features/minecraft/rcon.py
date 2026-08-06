@@ -21,6 +21,13 @@ SERVERDATA_RESPONSE_VALUE = 0
 
 _MAX_PACKET_LENGTH = 4096
 
+# After the first matching response packet is received, wait at most this long
+# for any additional packets / terminator before considering the response
+# complete. Vanilla Minecraft does not reliably send an empty "end of response"
+# packet, so blocking for the full timeout would report successful commands as
+# failures even though the server already executed them.
+_IDLE_RESPONSE_TIMEOUT = 1.0
+
 
 class RCONError(Exception):
     """Base error for all RCON operations."""
@@ -125,16 +132,32 @@ class RCONClient:
         chunks: list[bytes] = []
         try:
             while True:
+                # Once we have the first matching response, don't block for the
+                # full timeout waiting for a terminator that some server builds
+                # never send — use a short idle window instead so successful
+                # commands are not reported as failed.
+                read_timeout = _IDLE_RESPONSE_TIMEOUT if chunks else timeout
                 response_id, packet_type, payload = await asyncio.wait_for(
-                    self._recv_packet(), timeout=timeout
+                    self._recv_packet(), timeout=read_timeout
                 )
-                if packet_type != SERVERDATA_RESPONSE_VALUE or response_id != request_id:
+                if packet_type != SERVERDATA_RESPONSE_VALUE:
                     continue
-                chunks.append(payload)
-                if not payload:
+                if response_id != request_id:
+                    # A packet for a different request id (e.g. a leftover
+                    # keepalive or the server's reply to another packet) marks
+                    # the end of this command's response.
                     break
+                if not payload and chunks:
+                    # Matching empty terminator sent after the actual output.
+                    break
+                chunks.append(payload)
         except (TimeoutError, RCONError) as exc:
-            raise RCONCommandError(f"RCON command {command!r} failed: {exc}") from exc
+            if not chunks:
+                raise RCONCommandError(f"RCON command {command!r} failed: {exc}") from exc
+            # We already received the command's output. If no terminator
+            # arrives within the idle window, or the server closes the
+            # connection right after responding (e.g. during shutdown), the
+            # collected output is the complete response.
 
         return b"".join(chunks).decode("utf-8", errors="replace").strip("\n")
 

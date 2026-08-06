@@ -44,6 +44,63 @@ class _FakeRCONClient:
         self.closed = True
 
 
+class _CommandFailRCONClient:
+    """RCON client whose command is delivered but whose response fails.
+
+    Used to verify that ``_rcon_exec`` never re-sends a command once it has
+    been handed to the server (RCON commands are not idempotent).
+    """
+
+    instances: list[_CommandFailRCONClient] = []
+
+    def __init__(self, host: str, port: int) -> None:
+        self.host = host
+        self.port = port
+        self.connected_password: str | None = None
+        self.command_calls = 0
+        self.closed = False
+        self.__class__.instances.append(self)
+
+    async def connect(self, password: str, timeout: float = 10.0) -> None:
+        self.connected_password = password
+
+    async def command(self, command: str, timeout: float = 15.0) -> str:
+        self.command_calls += 1
+        raise minecraft_rcon.RCONCommandError("command sent but response failed")
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _ConnectFailRCONClient:
+    """RCON client whose connection cannot be established.
+
+    Used to verify that connection-level failures are retried while the
+    command itself is never sent.
+    """
+
+    instances: list[_ConnectFailRCONClient] = []
+
+    def __init__(self, host: str, port: int) -> None:
+        self.host = host
+        self.port = port
+        self.connect_calls = 0
+        self.command_calls = 0
+        self.closed = False
+        self.__class__.instances.append(self)
+
+    async def connect(self, password: str, timeout: float = 10.0) -> None:
+        self.connect_calls += 1
+        raise minecraft_rcon.RCONConnectionError("cannot connect")
+
+    async def command(self, command: str, timeout: float = 15.0) -> str:
+        self.command_calls += 1
+        return "ok"
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 class _FakeSocket:
     def __init__(self, *args: object, **kwargs: object) -> None:
         self.connected_to: tuple[str, int] | None = None
@@ -269,6 +326,175 @@ async def test_rcon_auth_tolerates_extra_response_packet() -> None:
         await client.close()
         server.close()
         await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_rcon_command_succeeds_without_terminator() -> None:
+    """A successful command whose response has no empty terminator must not be
+    reported as failed (vanilla Minecraft does not always send one)."""
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            raw_length = await reader.readexactly(4)
+            length = struct.unpack("<i", raw_length)[0]
+            body = await reader.readexactly(length)
+            request_id, packet_type = struct.unpack("<ii", body[:8])
+            assert packet_type == minecraft_rcon.SERVERDATA_AUTH
+            writer.write(_pack_packet(request_id, minecraft_rcon.SERVERDATA_AUTH_RESPONSE))
+            await writer.drain()
+
+            raw_length = await reader.readexactly(4)
+            length = struct.unpack("<i", raw_length)[0]
+            body = await reader.readexactly(length)
+            command_id, packet_type = struct.unpack("<ii", body[:8])
+            assert packet_type == minecraft_rcon.SERVERDATA_EXECCOMMAND
+
+            # Send ONLY the response — no empty terminator.
+            writer.write(
+                _pack_packet(
+                    command_id, minecraft_rcon.SERVERDATA_RESPONSE_VALUE, b"summoned warden"
+                )
+            )
+            await writer.drain()
+            # Keep the connection open briefly like a real server would.
+            await asyncio.sleep(0.05)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    host, port = server.sockets[0].getsockname()[:2]
+
+    try:
+        client = RCONClient(host, port)
+        await client.connect("secret", timeout=1)
+        output = await client.command("summon warden", timeout=1)
+        assert output == "summoned warden"
+    finally:
+        await client.close()
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_rcon_command_handles_empty_packet_before_response() -> None:
+    """Some RCON servers send an empty packet before the real output; the client
+    must not stop at the empty packet and lose the response."""
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            raw_length = await reader.readexactly(4)
+            length = struct.unpack("<i", raw_length)[0]
+            body = await reader.readexactly(length)
+            request_id, packet_type = struct.unpack("<ii", body[:8])
+            assert packet_type == minecraft_rcon.SERVERDATA_AUTH
+            writer.write(_pack_packet(request_id, minecraft_rcon.SERVERDATA_AUTH_RESPONSE))
+            await writer.drain()
+
+            raw_length = await reader.readexactly(4)
+            length = struct.unpack("<i", raw_length)[0]
+            body = await reader.readexactly(length)
+            command_id, packet_type = struct.unpack("<ii", body[:8])
+            assert packet_type == minecraft_rcon.SERVERDATA_EXECCOMMAND
+
+            # Empty packet first, then the actual output.
+            writer.write(_pack_packet(command_id, minecraft_rcon.SERVERDATA_RESPONSE_VALUE))
+            writer.write(
+                _pack_packet(
+                    command_id, minecraft_rcon.SERVERDATA_RESPONSE_VALUE, b"summoned warden"
+                )
+            )
+            await writer.drain()
+            await asyncio.sleep(0.05)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    host, port = server.sockets[0].getsockname()[:2]
+
+    try:
+        client = RCONClient(host, port)
+        await client.connect("secret", timeout=1)
+        output = await client.command("summon warden", timeout=1)
+        assert output == "summoned warden"
+    finally:
+        await client.close()
+        server.close()
+        await server.wait_closed()
+
+
+def _rcon_exec_fixture(
+    tmp_path: Path,
+) -> tuple[minecraft_service.MinecraftService, MinecraftServer]:
+    """Build a service + server wired to a temp folder for ``_rcon_exec`` tests."""
+    folder = tmp_path / "testy"
+    folder.mkdir()
+    (folder / "server.properties").write_text(
+        "server-port=25565\nrcon.port=10010\nrcon.password=abc123\n",
+        encoding="utf-8",
+    )
+    (folder / ".rcon_password").write_text("file-secret\n", encoding="utf-8")
+    server = MinecraftServer(
+        id=1,
+        alias="testy",
+        folder_path=str(folder),
+        port=25565,
+        status="running",
+        created_by=123,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    settings = Settings(
+        _env_file=None,
+        database_dsn="postgresql://user:pass@localhost/db",
+        discord_token="token",
+    )
+    return minecraft_service.MinecraftService(_FakeRepo(server), settings), server
+
+
+@pytest.mark.asyncio
+async def test_rcon_exec_does_not_retry_after_command_sent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Once a command has been sent to the server it must not be re-sent, even
+    if the response fails — RCON commands are not idempotent (e.g. ``summon``
+    would spawn a new entity on every retry)."""
+
+    async def _no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    service, server = _rcon_exec_fixture(tmp_path)
+    monkeypatch.setattr(minecraft_service, "RCONClient", _CommandFailRCONClient)
+
+    with pytest.raises(minecraft_service.MinecraftRconError):
+        await service._rcon_exec(server, "effect give p strength infinite 255 true")
+
+    instances = _CommandFailRCONClient.instances
+    assert len(instances) == 1  # no connection retry either
+    assert instances[0].command_calls == 1  # command sent exactly once
+
+
+@pytest.mark.asyncio
+async def test_rcon_exec_retries_connection_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Connection-level failures (before the command is sent) are retried."""
+
+    async def _no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    service, server = _rcon_exec_fixture(tmp_path)
+    monkeypatch.setattr(minecraft_service, "RCONClient", _ConnectFailRCONClient)
+
+    with pytest.raises(minecraft_service.MinecraftRconError):
+        await service._rcon_exec(server, "list")
+
+    instances = _ConnectFailRCONClient.instances
+    assert len(instances) == 3  # retried across all attempts
+    assert all(c.command_calls == 0 for c in instances)  # command never sent
 
 
 @pytest.mark.asyncio
