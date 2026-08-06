@@ -31,7 +31,7 @@ def build_intents() -> Intents:
 
 
 def create_bot(
-    prefix: str,
+    prefix: str | Callable[..., list[str] | str] | None = None,
     *,
     sync_commands: bool = False,
     on_ready: Callable[[], Awaitable[None]] | None = None,
@@ -39,7 +39,8 @@ def create_bot(
     """Create and configure the bot instance.
 
     Args:
-        prefix: Command prefix, e.g. ``"!"``.
+        prefix: Command prefix. Pass ``commands.when_mentioned`` (or ``None``)
+            to disable text prefixes so only slash commands work.
         sync_commands: If True, sync application commands on startup.
         on_ready: Optional coroutine invoked once after the bot becomes ready
             (used, for example, to start the scheduler — Bot Ready → Scheduler
@@ -49,7 +50,7 @@ def create_bot(
         A configured :class:`commands.Bot`.
     """
     bot = commands.Bot(
-        command_prefix=prefix,
+        command_prefix=prefix if prefix is not None else commands.when_mentioned,
         intents=build_intents(),
         help_command=None,
     )

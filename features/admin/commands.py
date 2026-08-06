@@ -1,8 +1,7 @@
 """Admin / operations commands.
 
 Provides administrator-only lifecycle commands (shutdown, restart) and a
-health-check command available to everyone. Both slash commands and the legacy
-``!`` prefix variants are registered.
+health-check command available to everyone, exposed as slash commands only.
 
 Permission model:
 - Shutdown / restart → Discord Administrator (or guild owner) via ``@admin_only``.
@@ -16,7 +15,6 @@ from typing import Any
 
 import discord
 from discord import app_commands
-from discord.ext import commands
 from discord.ext.commands import Bot
 
 from core.logger import get_logger
@@ -32,14 +30,14 @@ _CONFIRM_DELAY = 0.75
 
 
 class AdminCog(FeatureCog):
-    """Slash + prefix commands for bot lifecycle and status."""
+    """Slash commands for bot lifecycle and status."""
 
     def __init__(self, bot: Bot, system_service: SystemService) -> None:
         super().__init__(bot)
         self._system = system_service
 
     # ------------------------------------------------------------------
-    # Slash commands
+    # Commands
     # ------------------------------------------------------------------
 
     @app_commands.command(name="봇_종료", description="봇을 종료합니다. (관리자)")
@@ -69,42 +67,6 @@ class AdminCog(FeatureCog):
         """Reply with a health snapshot."""
         await interaction.response.defer()
         await interaction.followup.send(await self._format_health())
-
-    # ------------------------------------------------------------------
-    # Prefix commands (!봇 종료 / !봇 재시작 / !상태)
-    # ------------------------------------------------------------------
-
-    @commands.group(name="봇", invoke_without_command=True)
-    async def admin_group(self, ctx: commands.Context) -> None:
-        """Legacy ``!봇`` group: ``!봇 종료``, ``!봇 재시작``."""
-        await ctx.send("사용법: `!봇 종료` (종료), `!봇 재시작` (재시작)")
-
-    @admin_group.command(name="종료")
-    @admin_only()
-    async def prefix_shutdown(self, ctx: commands.Context) -> None:
-        """Gracefully shut the bot down (``!봇 종료``)."""
-        await self._confirm_and_run_ctx(
-            ctx,
-            message="🛑 봇을 종료합니다. 잠시만 기다려 주세요...",
-            action=self._system.shutdown,
-            reason="관리자 명령 (!봇 종료)",
-        )
-
-    @admin_group.command(name="재시작")
-    @admin_only()
-    async def prefix_restart(self, ctx: commands.Context) -> None:
-        """Gracefully restart the bot (``!봇 재시작``)."""
-        await self._confirm_and_run_ctx(
-            ctx,
-            message="🔄 봇을 재시작합니다. 잠시만 기다려 주세요...",
-            action=self._system.restart,
-            reason="관리자 명령 (!봇 재시작)",
-        )
-
-    @commands.command(name="상태")
-    async def prefix_status(self, ctx: commands.Context) -> None:
-        """Reply with a health snapshot (``!상태``)."""
-        await ctx.send(await self._format_health())
 
     # ------------------------------------------------------------------
     # Shared helpers
@@ -159,18 +121,6 @@ class AdminCog(FeatureCog):
         reason: str,
     ) -> None:
         await interaction.response.send_message(message)
-        await asyncio.sleep(_CONFIRM_DELAY)
-        await action(reason)
-
-    async def _confirm_and_run_ctx(
-        self,
-        ctx: commands.Context,
-        *,
-        message: str,
-        action: Any,
-        reason: str,
-    ) -> None:
-        await ctx.send(message)
         await asyncio.sleep(_CONFIRM_DELAY)
         await action(reason)
 

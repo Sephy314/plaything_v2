@@ -1,8 +1,8 @@
 """E2E-style tests for the admin cog command flows.
 
-Exercises the slash and prefix command handlers end-to-end against a fake
-system service: confirmations are sent, shutdown/restart reasons are recorded,
-and the health snapshot is rendered.
+Exercises the slash command handlers end-to-end against a fake system
+service: confirmations are sent, shutdown/restart reasons are recorded, and
+the health snapshot is rendered.
 """
 
 from __future__ import annotations
@@ -70,14 +70,6 @@ class FakeInteraction:
         self.followup = FakeFollowup()
 
 
-class FakeCtx:
-    def __init__(self) -> None:
-        self.messages: list[str] = []
-
-    async def send(self, message: str) -> None:
-        self.messages.append(message)
-
-
 def _make_cog(system: FakeSystem | None = None) -> AdminCog:
     return AdminCog(FakeBot(), system or FakeSystem())
 
@@ -110,19 +102,6 @@ async def test_slash_restart_confirms_and_requests_restart(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_prefix_shutdown_and_restart(monkeypatch) -> None:
-    monkeypatch.setattr(admin_commands, "_CONFIRM_DELAY", 0)
-    system = FakeSystem()
-    cog = _make_cog(system)
-
-    await cog.prefix_shutdown.callback(cog, FakeCtx())
-    await cog.prefix_restart.callback(cog, FakeCtx())
-
-    assert system.shutdown_reasons == ["관리자 명령 (!봇 종료)"]
-    assert system.restart_reasons == ["관리자 명령 (!봇 재시작)"]
-
-
-@pytest.mark.asyncio
 async def test_slash_status_renders_health() -> None:
     cog = _make_cog(FakeSystem(health=HEALTH))
     interaction = FakeInteraction()
@@ -133,18 +112,6 @@ async def test_slash_status_renders_health() -> None:
     assert interaction.followup.messages
     assert "봇 상태" in interaction.followup.messages[0]
     assert "25.5ms" in interaction.followup.messages[0]
-
-
-@pytest.mark.asyncio
-async def test_prefix_status_renders_health() -> None:
-    cog = _make_cog(FakeSystem(health=HEALTH))
-    ctx = FakeCtx()
-
-    await cog.prefix_status.callback(cog, ctx)
-
-    assert ctx.messages
-    assert "봇 상태" in ctx.messages[0]
-    assert "1시간 1분 1초" in ctx.messages[0]
 
 
 def test_format_uptime() -> None:

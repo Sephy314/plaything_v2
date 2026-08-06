@@ -160,7 +160,7 @@ Optional variables:
 
 ## Commands
 
-All commands are **slash commands** (application commands) and are synced automatically at bot startup. A legacy text prefix (`!`) is still configured as `BOT_PREFIX`.
+All commands are **slash commands** (application commands) and are synced automatically at bot startup. Text prefixes are disabled — the bot responds only to slash commands.
 
 ### Minecraft — `/마크_*`
 
@@ -239,8 +239,6 @@ The daily meal is published **automatically** by the scheduler — no user comma
 | `/봇_재시작` | Gracefully restart the bot (container/systemd re-spawns it) | Admin |
 | `/봇_상태` | Show health: bot, ping, DB, scheduler, voice, uptime | Everyone |
 
-Legacy prefix variants: `!봇 종료`, `!봇 재시작`, `!상태`.
-
 ## Scheduling
 
 - **Daily meal job** — cron trigger at `07:00` in `Asia/Seoul` (`features/meal/scheduler.py`). It fetches `MEAL_URL` with `&MLSV_YMD=<yyyyMMdd>`, applies the NEIS parser (`INFO-000` success / `INFO-200` no meal), and posts to `MEAL_CHANNEL_ID` (falls back to `LOG_CHANNEL_ID`). If the time is past 18:00 it targets tomorrow's meal. All failures (HTTP / timeout / parser / Discord send) are caught and logged — the bot never crashes.
@@ -304,7 +302,7 @@ All admin gates are implemented with the shared `@admin_only()` decorator in `co
 
 ### Graceful shutdown
 
-`/봇_종료` (or `!봇 종료`) runs the full teardown in `bot/main.py`:
+`/봇_종료` runs the full teardown in `bot/main.py`:
 
 ```text
 Command → Permission check → Stop scheduler → Cancel background tasks
@@ -314,11 +312,11 @@ Command → Permission check → Stop scheduler → Cancel background tasks
 
 ### Graceful restart
 
-`/봇_재시작` (or `!봇 재시작`) runs the same teardown and then exits with code **42**. The Docker `restart: unless-stopped` policy (or a systemd unit with `Restart=on-failure`) re-spawns the process automatically.
+`/봇_재시작` runs the same teardown and then exits with code **42**. The Docker `restart: unless-stopped` policy (or a systemd unit with `Restart=on-failure`) re-spawns the process automatically.
 
 ### Health check
 
-`/봇_상태` (or `!상태`) reports: bot online / ping (ms) / database (ok|error) / scheduler (running|stopped) / voice connections / uptime / version.
+`/봇_상태` reports: bot online / ping (ms) / database (ok|error) / scheduler (running|stopped) / voice connections / uptime / version.
 
 ### Background tasks
 

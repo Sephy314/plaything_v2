@@ -13,7 +13,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from config.settings import BOT_PREFIX, get_settings
+from discord.ext import commands
+
+from config.settings import get_settings
 from core.container import init_container
 from core.discord import create_bot, load_cogs
 from core.discord_handler import DiscordLogWorker
@@ -158,7 +160,9 @@ async def _run(container, log_queue: asyncio.Queue) -> None:
     await _run_migrations(container)
 
     bot = create_bot(
-        BOT_PREFIX,
+        # Slash commands are the only command surface. ``!`` prefix parsing is
+        # disabled entirely — prefix commands are not registered anywhere.
+        commands.when_mentioned,
         sync_commands=True,
         on_ready=lambda: _start_scheduler_on_ready(container),
     )
