@@ -81,3 +81,11 @@ class MinecraftPermissionError(MinecraftException):
 
 class MinecraftUnauthorized(MinecraftException):
     """Raised when a Discord admin-only operation is attempted."""
+
+
+class MinecraftBackupError(MinecraftException):
+    """Raised when a Minecraft world backup fails (existing backups are kept)."""
+
+
+class MinecraftBackupInProgress(MinecraftBackupError):
+    """Raised when a backup is already running for the same server."""

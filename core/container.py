@@ -14,10 +14,12 @@ from core.logger import get_logger
 from core.scheduler import Scheduler
 from features.meal.scheduler import MealScheduler
 from features.meal.service import MealService
+from features.minecraft.scheduler import MinecraftBackupScheduler
 from repository.minecraft_repository import MinecraftRepository
 from repository.tts_voice_repository import TTSVoiceRepository
 from repository.user_repository import UserRepository
 from repository.voice_repository import VoiceRepository
+from services.minecraft_backup_service import MinecraftBackupService
 from services.minecraft_service import MinecraftService
 from services.tts_voice_service import TTSVoiceService
 from services.user_service import UserService
@@ -46,6 +48,14 @@ class Container:
         self.user_service = UserService(self.database)
         self.voice_service = VoiceService(self.voice_repository)
         self.minecraft_service = MinecraftService(self.minecraft_repository, settings)
+        self.minecraft_backup_service = MinecraftBackupService(self.minecraft_service, settings)
+        self.minecraft_backup_scheduler = MinecraftBackupScheduler(
+            self.scheduler,
+            self.minecraft_backup_service,
+            timezone=settings.timezone,
+            hour=settings.mc_backup_hour,
+            minute=settings.mc_backup_minute,
+        )
         self.tts_voice_service = TTSVoiceService(self.tts_voice_repository)
 
         self.meal_service = MealService(settings.meal_url)
