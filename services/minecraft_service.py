@@ -877,14 +877,23 @@ class MinecraftService:
 
     @staticmethod
     def _parse_list(output: str) -> tuple[list[str], int]:
-        """Parse the ``list`` output, e.g. ``There are 2/20 players online: a, b``."""
+        """Parse the ``list`` command output.
+
+        Handles both the legacy format (Minecraft < 1.20.3)::
+
+            There are 2/20 players online: a, b
+
+        and the newer format (Minecraft >= 1.20.3, which changed the wording)::
+
+            There are 2 of a max of 20 players online: a, b
+        """
         line = output.strip()
         # Remove common RCON prefixes like "[HH:MM:SS INFO]: "
         if line.startswith("[") and "]: " in line:
             line = line.split("]: ", 1)[-1]
 
-        # Extract player count
-        match = re.search(r"(\d+)/\d+ players online", line)
+        # Extract player count (both legacy "X/Y" and new "X of a max of Y")
+        match = re.search(r"(\d+)(?:/\d+| of a max of \d+) players online", line)
         count = int(match.group(1)) if match else 0
 
         # Extract player names (everything after "online: ")
