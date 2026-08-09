@@ -57,6 +57,7 @@ packages = [
     "features.tts",
     "features.music",
     "features.meal",
+    "features.admin",
 ]
 
 [tool.ruff]
@@ -73,3 +74,25 @@ target-version = ["py313"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["bot", "core", "config", "features", "repository", "services", "voice", "utils"]
+omit = ["*/__pycache__/*", "voice/audio/*", "voice/music/*", "voice/tts/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+# Baseline gate for CI. The new operations core (task manager, admin cog,
+# system service) is covered >90%; the whole-repo figure is dragged down by
+# the Discord command cogs, which require heavy interaction mocking.
+fail_under = 45
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "def __repr__",
+    "except Exception as exc:  # pragma: no cover",
+]

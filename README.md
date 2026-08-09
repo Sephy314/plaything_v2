@@ -156,11 +156,11 @@ Optional variables:
 | `MC_BACKUP_RETENTION_DAYS` | `90` | Delete backups older than this many days (newest per server always kept) |
 | `MC_BACKUP_HOUR` / `MC_BACKUP_MINUTE` | `4` / `0` | Daily automatic backup time (24h); backs up every server and prunes expired backups |
 | `FFMPEG_EXECUTABLE` | `ffmpeg` | FFmpeg executable for audio playback |
-| `LOG_CHANNEL_ID` | `0` | Discord channel for log embeds (`0` disables) |
+| `LOG_CHANNEL_ID` | **required** | Discord channel for log embeds (bot refuses to start without it) |
 
 ## Commands
 
-All commands are **slash commands** (application commands) and are synced automatically at bot startup. A legacy text prefix (`!`) is still configured as `BOT_PREFIX`.
+All commands are **slash commands** (application commands) and are synced automatically at bot startup. Text prefixes are disabled — the bot responds only to slash commands.
 
 ### Minecraft — `/마크_*`
 
@@ -175,14 +175,17 @@ All commands are **slash commands** (application commands) and are synced automa
 | `/마크_서버` | List all managed servers | — |
 | `/마크_로그 <alias>` | Show the last 50 lines of `latest.log` | — |
 | `/마크_명령어 <alias> <command>` | Run an RCON command | In-game OP |
-| `/마크_uuid등록 <user> <uuid>` | Link a Discord user ↔ Minecraft UUID | Admin |
-| `/마크_화이트리스트 <alias> <add\|remove> <nickname>` | Manage the whitelist | — |
+| `/마크_uuid등록 <user> <uuid>` | Link a Discord user ↔ Minecraft UUID (auto-whitelisted on all servers immediately) | Admin |
+| `/마크_등록 <uuid>` | Register your own Minecraft UUID (any server member; auto-whitelisted everywhere) | — |
+| `/마크_화이트리스트 <alias> <add\|remove> <target>` | Manage the whitelist (Discord mention/nickname or Minecraft nickname) | — |
 | `/마크_맵가져오기 <alias> [port]` | Import an external server/map folder as a managed server (registered in PostgreSQL, whitelist/OP applied) | Admin |
 | `/마크_백업 <alias>` | Create a server world backup | Admin |
 
 Behavior notes:
 
-- `/마크_생성` atomically creates the folder, writes the default files (`server.properties`, `eula.txt`, whitelist/ops), and inserts the DB row — rolling back (deleting the folder) on failure. `white-list=true` and RCON are enabled by default.
+- `/마크_생성` atomically creates the folder, writes the default files (`server.properties`, `eula.txt`, whitelist/ops), and inserts the DB row — rolling back (deleting the folder) on failure. `white-list=true` and RCON are enabled by default. All registered members are added to the new server's whitelist (only the creator becomes OP).
+- Users registered in the DB (`minecraft_users`) via `/마크_등록` or `/마크_uuid등록` are automatically whitelisted on every managed server — applied immediately over RCON on running servers and written to `whitelist.json` for stopped servers.
+- `/마크_화이트리스트` accepts a Minecraft nickname, a Discord mention (`<@id>`), or a server nickname; recognized Discord members are whitelisted by their registered UUID. The Server Members intent is required for nickname resolution.
 - `/마크_맵가져오기` (admin-only) finds an existing external server/map folder under `MC_PARENT_DIRECTORY`, registers it in the PostgreSQL `minecraft_servers` table, reads the port from the folder's `server.properties` (or auto-assigns one), enables RCON / whitelist enforcement, and applies every Discord↔UUID-registered member to the folder's `whitelist.json` / `ops.json`. Instead of uploading the map folder to Discord, just place the folder on the host.
 - `/마크_백업` (admin-only) snapshots the server world (`world/`, `world_nether/`, `world_the_end/`), server config (`server.properties`, `bukkit.yml`, `spigot.yml`, `config/paper-global.yml`) and `plugins/` into `<MC_BACKUP_DIRECTORY>/<alias>/<alias>-YYYYMMDD-HHmmss.backup.zip`. While the server runs it uses `save-off` → `save-all flush` → `save-on`; a failed backup keeps existing archives and re-enables world saving. Backups older than `MC_BACKUP_RETENTION_DAYS` are pruned automatically (the newest backup per server is always kept).
 - `/마크_명령어` is gated by the **server's `ops.json` OP status**, not by Discord permissions.
@@ -231,6 +234,14 @@ The daily meal is published **automatically** by the scheduler — no user comma
 | --- | --- |
 | `/help [category]` | Show an overview of all commands, or the details of one category (`minecraft`, `music`, `tts`, `meal`) |
 
+### Admin / Operations
+
+| Command | Description | Permission |
+| --- | --- | --- |
+| `/봇_종료` | Gracefully shut the bot down | Admin |
+| `/봇_재시작` | Gracefully restart the bot (container/systemd re-spawns it) | Admin |
+| `/봇_상태` | Show health: bot, ping, DB, scheduler, voice, uptime | Everyone |
+
 ## Scheduling
 
 - **Daily meal job** — cron trigger at `07:00` in `Asia/Seoul` (`features/meal/scheduler.py`). It fetches `MEAL_URL` with `&MLSV_YMD=<yyyyMMdd>`, applies the NEIS parser (`INFO-000` success / `INFO-200` no meal), and posts to `MEAL_CHANNEL_ID` (falls back to `LOG_CHANNEL_ID`). If the time is past 18:00 it targets tomorrow's meal. All failures (HTTP / timeout / parser / Discord send) are caught and logged — the bot never crashes.
@@ -278,10 +289,54 @@ Discord channel embed
 
 Structured events are emitted with `core.logger.log_event(logger, "Event Name", level=..., **details)`. Tracked events include:
 
-- **Bot**: Started / Ready / Shutdown / Reconnect / Exception
+- **Bot**: Started / Ready / Shutdown / Reconnect / Exception / Unhandled Loop Exception
 - **Scheduler**: Started / Stopped / job error / job missed
 - **Meal**: Fetch Started / Fetch Success / Fetch Failed
 - **Minecraft / TTS / Music**: regular `log.info` / `log.error` calls are reflected as embeds automatically.
+
+## Operations (Admin)
+
+### Permission model
+
+- **General users** — TTS, YouTube, music control, voice leave.
+- **Administrators** (Discord `Administrator` permission or guild owner) — bot shutdown / restart, Minecraft UUID management, system management.
+
+All admin gates are implemented with the shared `@admin_only()` decorator in `core/permissions.py`, which works for both slash and prefix commands.
+
+### Graceful shutdown
+
+`/봇_종료` runs the full teardown in `bot/main.py`:
+
+```text
+Command → Permission check → Stop scheduler → Cancel background tasks
+→ Disconnect voice → Save/stop Minecraft servers → Close meal service
+→ Log "Bot Shutdown" → Stop log worker → Discord logout → Close DB pool → exit(0)
+```
+
+### Graceful restart
+
+`/봇_재시작` runs the same teardown and then exits with code **42**. The Docker `restart: unless-stopped` policy (or a systemd unit with `Restart=on-failure`) re-spawns the process automatically.
+
+### Health check
+
+`/봇_상태` reports: bot online / ping (ms) / database (ok|error) / scheduler (running|stopped) / voice connections / uptime / version.
+
+### Background tasks
+
+`core/task_manager.py` tracks every long-running task; `shutdown()` cancels and drains them so no orphaned coroutines remain during shutdown.
+
+### Configuration validation
+
+`DATABASE_DSN` and `DISCORD_TOKEN` are required (pydantic). `LOG_CHANNEL_ID` is also required at startup — without it the bot refuses to start with a clear error, because operational logging is mandatory.
+
+## Troubleshooting
+
+- **Slash commands don't appear / stale autocomplete** — commands sync once per process at startup. After deploying new commands, restart the bot and refresh the Discord client. Global command changes can take time to propagate.
+- **`LOG_CHANNEL_ID` missing** — the bot refuses to start. Set it to a Discord channel the bot can post embeds to.
+- **Container not running the new code** — the image must be rebuilt: `docker compose up -d --build`. A stale image shows old behavior even when source changed.
+- **Minecraft servers can't start** — verify `MC_PARENT_DIRECTORY` is mounted into the container and `MC_JAVA_COMMAND` / `MC_SERVER_VERSION` are correct for the Paper/vanilla flavor.
+- **Bot reconnects constantly** — check `LOG_CHANNEL_ID` and that the Discord token / intents are valid; inspect `logs/bot.log` or the container journal.
+- **Database errors** — confirm the Postgres container is healthy (`docker compose ps`) and `DATABASE_DSN` points at the right host/port.
 
 ## Tests & Linting
 
@@ -289,17 +344,17 @@ Structured events are emitted with `core.logger.log_event(logger, "Event Name", 
 pip install -e ".[dev]"
 ruff check .
 black --check .
-pytest
-pytest --cov=core --cov=features --cov-report=term-missing   # coverage
+pytest                        # unit + integration + e2e
+pytest --cov --cov-report=term-missing   # coverage
 ```
 
-Test files:
+Test layout:
 
-- `tests/test_meal.py` — success / no-meal / API failure / parser failure / Discord send
-- `tests/test_meal_commands.py` — `/급식` and `/급식날짜` success, failure, and date validation
-- `tests/test_scheduler.py` — job registration (07:00, Asia/Seoul), execution, and exception handling
-- `tests/test_logger.py` — console / file / Discord handlers, queue behavior, embed rendering, worker
-- `tests/test_minecraft_connection.py`, `tests/test_music.py` — connection and music pipeline tests
+- `tests/unit/` — unit tests (meal, minecraft, music, logger, scheduler, permissions, task manager, database ping, voice manager)
+- `tests/integration/` — service + container wiring (system service health / lifecycle, container composition)
+- `tests/e2e/` — command flow tests (admin cog slash + prefix commands)
+
+CI (GitHub Actions): `.github/workflows/test.yml` (PostgreSQL service → migrations → pytest with coverage) and `.github/workflows/lint.yml` (ruff + black).
 
 ## License
 

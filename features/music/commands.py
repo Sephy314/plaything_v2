@@ -16,7 +16,6 @@ YouTube tracks with TTS output so both can play simultaneously.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 import discord
 from discord import app_commands
@@ -40,7 +39,7 @@ def _contains_match(text: str, current: str) -> bool:
     """Check if text matches current input (case-insensitive, partial match)."""
     current_lower = current.lower()
     text_lower = text.lower()
-    
+
     # Exact prefix match
     if text_lower.startswith(current_lower):
         return True
@@ -62,17 +61,15 @@ async def music_url_autocomplete(
         ("Piano Study Music (클래식 피아노)", "ytsearch1:piano study music"),
         ("Gaming Chill Mix (게임 브금)", "ytsearch1:gaming chill background music"),
     ]
-    
+
     # Filter with both prefix and partial matching
     filtered = [
-        (name, url) for name, url in presets 
+        (name, url)
+        for name, url in presets
         if not current or _contains_match(name, current) or _contains_match(url, current)
     ]
-    
-    return [
-        app_commands.Choice(name=name, value=url)
-        for name, url in filtered[:25]
-    ]
+
+    return [app_commands.Choice(name=name, value=url) for name, url in filtered[:25]]
 
 
 class MusicCog(FeatureCog):
@@ -123,7 +120,11 @@ class MusicCog(FeatureCog):
             return
 
         # Check if user is in a voice channel
-        if not isinstance(interaction.user, discord.Member) or not interaction.user.voice or not interaction.user.voice.channel:
+        if (
+            not isinstance(interaction.user, discord.Member)
+            or not interaction.user.voice
+            or not interaction.user.voice.channel
+        ):
             await interaction.followup.send("❌ 음성 채널에 접속해야 합니다.")
             return
 

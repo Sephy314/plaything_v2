@@ -11,13 +11,18 @@ Lifecycle contract:
 from __future__ import annotations
 
 import asyncio
+import logging
 
-from config.settings import BOT_PREFIX, get_settings
+from discord.ext import commands
+
+from config.settings import get_settings
 from core.container import init_container
 from core.discord import create_bot, load_cogs
 from core.discord_handler import DiscordLogWorker
+from core.exceptions import ConfigurationException
 from core.logger import get_logger, log_event, setup_logging
 from core.scheduler import scheduler_heartbeat
+from services.system_service import RESTART_EXIT_CODE
 
 # NOTE: The meal feature is normally driven solely by the daily scheduler job
 # (07:00 Asia/Seoul). The meal cog provides debug/integration-test commands
@@ -28,9 +33,46 @@ COGS = [
     "features.music.commands",
     "features.tts.commands",
     "features.meal.commands",
+    "features.admin.commands",
 ]
 
 log = get_logger(__name__)
+
+
+def validate_config(settings) -> None:
+    """Fail fast with a clear message when required settings are missing.
+
+    ``DATABASE_DSN`` and ``DISCORD_TOKEN`` are already required and validated
+    by :class:`Settings`; ``LOG_CHANNEL_ID`` is validated here so operational
+    logging is guaranteed before the bot starts.
+
+    Raises:
+        ConfigurationException: If a required setting is missing.
+    """
+    if not settings.log_channel_id:
+        raise ConfigurationException(
+            "LOG_CHANNEL_ID is required for operational logging. "
+            "Set it to the Discord channel where log embeds should be sent "
+            "and restart the bot."
+        )
+
+
+def _handle_loop_exception(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+    """Global asyncio exception handler.
+
+    Logs otherwise-unhandled loop exceptions to every destination (console /
+    file / Discord) and does not take down the process — discord.py's own
+    reconnect logic keeps the bot alive.
+    """
+    message = context.get("message", "Unhandled exception in event loop")
+    exc = context.get("exception")
+    log.critical("unhandled loop exception: %s", message, exc_info=exc)
+    log_event(
+        log,
+        "Unhandled Loop Exception",
+        level=logging.ERROR,
+        error=message,
+    )
 
 
 async def _run_migrations(container) -> None:
@@ -111,11 +153,16 @@ async def _run(container, log_queue: asyncio.Queue) -> None:
         container: The configured dependency container.
         log_queue: The queue fed by logging handlers for Discord output.
     """
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(_handle_loop_exception)
+
     await container.database.connect()
     await _run_migrations(container)
 
     bot = create_bot(
-        BOT_PREFIX,
+        # Slash commands are the only command surface. ``!`` prefix parsing is
+        # disabled entirely — prefix commands are not registered anywhere.
+        commands.when_mentioned,
         sync_commands=True,
         on_ready=lambda: _start_scheduler_on_ready(container),
     )
@@ -132,11 +179,30 @@ async def _run(container, log_queue: asyncio.Queue) -> None:
     try:
         await bot.start(container.settings.discord_token)
     finally:
-        # Lifecycle: stop background jobs first, then close the bot. The
-        # shutdown event is logged before the log worker drains and stops.
-        await container.scheduler.shutdown()
-        await container.minecraft_service.shutdown_all()
-        await container.meal_service.close()
+        # Graceful shutdown: scheduler → background tasks → voice → Minecraft
+        # → meal → Discord logout → DB. Any exception during cleanup is logged
+        # but never allowed to mask the original exit path.
+        try:
+            await container.scheduler.shutdown()
+        except Exception as exc:
+            log.error("scheduler shutdown failed: %s", exc, exc_info=exc)
+        try:
+            await container.task_manager.shutdown()
+        except Exception as exc:
+            log.error("task manager shutdown failed: %s", exc, exc_info=exc)
+        if container.voice_manager is not None:
+            try:
+                await container.voice_manager.shutdown_all()
+            except Exception as exc:
+                log.error("voice shutdown failed: %s", exc, exc_info=exc)
+        try:
+            await container.minecraft_service.shutdown_all()
+        except Exception as exc:
+            log.error("minecraft shutdown failed: %s", exc, exc_info=exc)
+        try:
+            await container.meal_service.close()
+        except Exception as exc:
+            log.error("meal service close failed: %s", exc, exc_info=exc)
         log_event(log, "Bot Shutdown")
         await log_worker.stop()
         await bot.close()
@@ -155,6 +221,12 @@ def main() -> None:
         log.critical("Configuration error: %s", exc, exc_info=exc)
         raise SystemExit(1) from exc
 
+    try:
+        validate_config(settings)
+    except ConfigurationException as exc:
+        log.critical("Configuration error: %s", exc)
+        raise SystemExit(1) from exc
+
     container = init_container(settings)
     container.log_queue = queue
     log_event(log, "Bot Started")
@@ -166,6 +238,15 @@ def main() -> None:
     except Exception as exc:
         log.critical("Fatal error during startup/shutdown: %s", exc, exc_info=exc)
         raise SystemExit(1) from exc
+
+    # An admin lifecycle command (shutdown/restart) sets the requested exit
+    # code before closing the bot. Restart codes let the container restart
+    # policy (or systemd) re-spawn the process.
+    if container.shutdown_exit_code is not None:
+        code = container.shutdown_exit_code
+        if code == RESTART_EXIT_CODE:
+            log.info("process exiting with restart code %s", code)
+        raise SystemExit(code)
 
 
 if __name__ == "__main__":

@@ -65,8 +65,13 @@ HELP_DATA = {
             },
             {
                 "name": "/마크_화이트리스트",
-                "args": "<서버이름> <add|remove> <닉네임>",
-                "description": "화이트리스트를 관리합니다.",
+                "args": "<서버이름> <add|remove> <닉네임/멘션>",
+                "description": "화이트리스트 관리 (Discord 닉네임/멘션 또는 Minecraft 닉네임)",
+            },
+            {
+                "name": "/마크_등록",
+                "args": "<UUID>",
+                "description": "내 Minecraft UUID 등록 → 전체 서버 화이트리스트 자동 추가",
             },
             {
                 "name": "/마크_uuid등록",

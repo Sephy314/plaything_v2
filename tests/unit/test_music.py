@@ -6,14 +6,13 @@ Tests queue management, player logic, service layer, and command integration.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 from core.exceptions import VoiceException, YoutubeError
 from features.music.service import MusicService
 from voice.music.player import MusicPlayer, Track
-
 
 # ============================================================================
 # Fakes and Mocks
@@ -218,7 +217,9 @@ async def test_music_service_play_music_no_voice_channel() -> None:
     service = MusicService(voice_manager, youtube, log_channel_id=0)
 
     with pytest.raises(VoiceException, match="voice channel"):
-        await service.play_music(guild_id=12345, user_channel=None, url="http://youtube.com/watch?v=123")
+        await service.play_music(
+            guild_id=12345, user_channel=None, url="http://youtube.com/watch?v=123"
+        )
 
 
 @pytest.mark.asyncio
@@ -285,7 +286,9 @@ async def test_music_service_skip() -> None:
 
     # Setup a connection
     channel = Mock()
-    await service.play_music(guild_id=12345, user_channel=channel, url="http://youtube.com/watch?v=123")
+    await service.play_music(
+        guild_id=12345, user_channel=channel, url="http://youtube.com/watch?v=123"
+    )
 
     # Skip
     await service.skip(guild_id=12345)
@@ -319,7 +322,9 @@ async def test_music_service_stop() -> None:
 
     # Setup a connection
     channel = Mock()
-    await service.play_music(guild_id=12345, user_channel=channel, url="http://youtube.com/watch?v=123")
+    await service.play_music(
+        guild_id=12345, user_channel=channel, url="http://youtube.com/watch?v=123"
+    )
 
     # Verify connection exists
     assert voice_manager.get_connection(12345) is not None
@@ -517,16 +522,16 @@ async def test_music_service_youtube_error() -> None:
 
     voice_manager._audio_factory = audio_factory
 
-    youtube = FakeYoutubeClient(
-        tracks=[Track(url="http://example.com/1", title="Track 1")]
-    )
+    youtube = FakeYoutubeClient(tracks=[Track(url="http://example.com/1", title="Track 1")])
     service = MusicService(voice_manager, youtube, log_channel_id=0)
 
     channel = Mock()
 
     # Should propagate YoutubeError from AudioManager
     with pytest.raises(YoutubeError):
-        await service.play_music(guild_id=12345, user_channel=channel, url="http://youtube.com/watch?v=invalid")
+        await service.play_music(
+            guild_id=12345, user_channel=channel, url="http://youtube.com/watch?v=invalid"
+        )
 
 
 @pytest.mark.asyncio
@@ -554,4 +559,6 @@ async def test_music_service_voice_connection_failure() -> None:
     channel = Mock()
 
     with pytest.raises(YoutubeError, match="Playback failed"):
-        await service.play_music(guild_id=12345, user_channel=channel, url="http://youtube.com/watch?v=123")
+        await service.play_music(
+            guild_id=12345, user_channel=channel, url="http://youtube.com/watch?v=123"
+        )

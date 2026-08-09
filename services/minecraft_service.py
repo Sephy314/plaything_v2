@@ -159,6 +159,7 @@ class MinecraftService:
             raise
 
         await self._register_creator_op(server, created_by)
+        await self._sync_all_whitelists(server)
         log.info(
             "Minecraft server created: alias=%s port=%s folder=%s",
             server.alias,
@@ -226,9 +227,7 @@ class MinecraftService:
                 )
             conflict = await self._repository.find_server_by_port(port)
             if conflict is not None:
-                raise MinecraftPortConflict(
-                    f"Port {port} is already in use by another server"
-                )
+                raise MinecraftPortConflict(f"Port {port} is already in use by another server")
 
         server = await self._repository.register_server(alias, str(folder), port, created_by)
         try:
@@ -237,9 +236,7 @@ class MinecraftService:
         except Exception as exc:  # pragma: no cover - defensive
             # The row is already registered; log the post-setup failure instead
             # of rolling the import back entirely.
-            log.warning(
-                "post-migration setup failed for %s: %s", alias, exc, exc_info=exc
-            )
+            log.warning("post-migration setup failed for %s: %s", alias, exc, exc_info=exc)
 
         log.info(
             "External server folder migrated: alias=%s port=%s folder=%s created_by=%s",
@@ -420,11 +417,16 @@ class MinecraftService:
         return output
 
     async def register_uuid(self, discord_id: int, minecraft_uuid: str) -> MinecraftUser:
-        """Persist (admin-only) the Discord↔UUID mapping for a user."""
+        """Persist the Discord↔UUID mapping for a user.
+
+        Once registered, the user is automatically added to the whitelist of
+        every managed server, so DB-registered members are allowed by default.
+        """
         normalized = self._canonical_uuid(minecraft_uuid)
         if normalized is None:
             raise MinecraftUnauthorized(f"Invalid Minecraft UUID: {minecraft_uuid!r}")
         user = await self._repository.upsert_user(discord_id, normalized)
+        await self._sync_user_to_whitelists(user)
         log.info("Minecraft UUID registered: discord_id=%s uuid=%s", discord_id, normalized)
         return user
 
@@ -469,6 +471,58 @@ class MinecraftService:
         """
         server = await self.find_server(alias)
         return await self._rcon_exec(server, command)
+
+    async def whitelist_user(self, alias: str, action: str, discord_id: int) -> str:
+        """Add/remove a Discord member from a server's whitelist via their UUID.
+
+        The member must have a registered Discord↔UUID mapping (see
+        :meth:`register_uuid`). When the server is running the change is
+        applied over RCON so it takes effect immediately; otherwise the
+        folder's ``whitelist.json`` is edited directly and applies on next
+        start.
+
+        Args:
+            alias: The server alias.
+            action: ``"add"`` or ``"remove"``.
+            discord_id: The Discord user id of the member.
+
+        Raises:
+            MinecraftUnauthorized: If the Discord user has no registered UUID.
+        """
+        user = await self._repository.find_user_by_discord(discord_id)
+        if user is None:
+            raise MinecraftUnauthorized(
+                f"<@{discord_id}> 님은 아직 Minecraft UUID를 등록하지 않았습니다. "
+                "`/마크_등록 <uuid>`으로 먼저 등록해 주세요."
+            )
+        server = await self.find_server(alias)
+        verb = "add" if action == "add" else "remove"
+        folder = Path(server.folder_path)
+        if server.id in self._processes:
+            output = await self._rcon_exec(server, f"whitelist {verb} {user.minecraft_uuid}")
+            log.info(
+                "Whitelist updated (discord): alias=%s action=%s discord_id=%s uuid=%s",
+                alias,
+                action,
+                discord_id,
+                user.minecraft_uuid,
+            )
+            return output
+
+        if action == "add":
+            added = self._ensure_whitelist_entry(folder, user.minecraft_uuid)
+            detail = "added" if added else "already present"
+        else:
+            removed = self._remove_whitelist_entry(folder, user.minecraft_uuid)
+            detail = "removed" if removed else "not present"
+        log.info(
+            "Whitelist updated (file): alias=%s action=%s discord_id=%s (%s)",
+            alias,
+            action,
+            discord_id,
+            detail,
+        )
+        return f"whitelist {verb} {user.minecraft_uuid}: {detail}"
 
     async def read_logs(self, alias: str, lines: int = 50) -> str:
         """Read the last N lines of the server's latest.log file."""
@@ -596,11 +650,7 @@ class MinecraftService:
         config_dir = folder / "config"
         config_dir.mkdir(parents=True, exist_ok=True)
         path = config_dir / "paper-global.yml"
-        block = (
-            "spark:\n"
-            "  enable-immediately: false\n"
-            "  enabled: false\n"
-        )
+        block = "spark:\n" "  enable-immediately: false\n" "  enabled: false\n"
         if not path.exists():
             path.write_text(block, encoding="utf-8")
             return
@@ -663,6 +713,59 @@ class MinecraftService:
         self._add_to_ops(folder, user.minecraft_uuid)
         self._add_to_whitelist(folder, user.minecraft_uuid)
         log.info("Creator registered as OP: alias=%s uuid=%s", server.alias, user.minecraft_uuid)
+
+    async def _sync_all_whitelists(self, server: MinecraftServer) -> None:
+        """Whitelist every registered member on a newly created server.
+
+        Only the creator is granted OP (see :meth:`_register_creator_op`); all
+        other DB-registered members are whitelisted so they can join by
+        default. Entries already present are left untouched.
+        """
+        users = await self._repository.list_users()
+        folder = Path(server.folder_path)
+        added = 0
+        for user in users:
+            if self._ensure_whitelist_entry(folder, user.minecraft_uuid):
+                added += 1
+        if added:
+            log.info(
+                "whitelisted %d existing members on new server %s",
+                added,
+                server.alias,
+            )
+
+    async def _sync_user_to_whitelists(self, user: MinecraftUser) -> None:
+        """Whitelist a newly-registered user on every managed server.
+
+        Running servers get the change applied over RCON immediately; stopped
+        servers get their ``whitelist.json`` updated so the entry is present
+        on the next start.
+        """
+        servers = await self._repository.list_servers()
+        if not servers:
+            return
+        applied = 0
+        for server in servers:
+            folder = Path(server.folder_path)
+            if server.id in self._processes:
+                try:
+                    await self._rcon_exec(server, f"whitelist add {user.minecraft_uuid}")
+                    applied += 1
+                    continue
+                except MinecraftRconError:
+                    log.warning(
+                        "RCON whitelist add failed for %s (uuid=%s); falling back to file",
+                        server.alias,
+                        user.minecraft_uuid,
+                    )
+            if self._ensure_whitelist_entry(folder, user.minecraft_uuid):
+                applied += 1
+        log.info(
+            "auto-whitelist applied: discord_id=%s servers=%s applied=%s",
+            user.discord_id,
+            len(servers),
+            applied,
+        )
 
     # ------------------------------------------------------------------
     # Runtime files
@@ -929,7 +1032,7 @@ class MinecraftService:
                 await client.close()
                 if attempt < max_retries - 1:
                     # Wait before retrying (exponential backoff)
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
             except RCONError as exc:
                 # The command was already sent and the server may have executed
                 # it. Do NOT retry — that would execute it again.
@@ -1052,6 +1155,49 @@ class MinecraftService:
             folder / "whitelist.json",
             {"uuid": minecraft_uuid, "name": ""},
         )
+
+    @classmethod
+    def _ensure_whitelist_entry(cls, folder: Path, minecraft_uuid: str) -> bool:
+        """Add a UUID to ``whitelist.json`` if missing.
+
+        Returns:
+            True if a new entry was written, False when it was already present.
+        """
+        whitelist = _load_json_list(folder / "whitelist.json")
+        normalized = cls._normalize_uuid(minecraft_uuid)
+        if normalized is None:
+            return False
+        existing = {
+            cls._normalize_uuid(e.get("uuid"))
+            for e in whitelist
+            if isinstance(e, dict) and cls._normalize_uuid(e.get("uuid"))
+        }
+        if normalized in existing:
+            return False
+        whitelist.append({"uuid": minecraft_uuid, "name": ""})
+        _write_json_list(folder / "whitelist.json", whitelist)
+        return True
+
+    @classmethod
+    def _remove_whitelist_entry(cls, folder: Path, minecraft_uuid: str) -> bool:
+        """Remove a UUID from ``whitelist.json`` if present.
+
+        Returns:
+            True if an entry was removed, False when it was not present.
+        """
+        whitelist = _load_json_list(folder / "whitelist.json")
+        normalized = cls._normalize_uuid(minecraft_uuid)
+        if normalized is None:
+            return False
+        kept = [
+            e
+            for e in whitelist
+            if not (isinstance(e, dict) and cls._normalize_uuid(e.get("uuid")) == normalized)
+        ]
+        if len(kept) == len(whitelist):
+            return False
+        _write_json_list(folder / "whitelist.json", kept)
+        return True
 
     def _patch_external_properties(self, folder: Path, alias: str) -> None:
         """Enable RCON and whitelist enforcement on an imported folder.

@@ -43,6 +43,10 @@ class ValidationException(AppException):
     """Raised when input validation fails."""
 
 
+class PermissionDenied(AppException):
+    """Raised when a user lacks the required Discord permission."""
+
+
 class MinecraftException(AppException):
     """Base class for Minecraft-specific failures."""
 

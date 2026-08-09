@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from voice.audio.pcm import PcmFrameSource, FRAME_BYTES, silence_frame
+from voice.audio.pcm import FRAME_BYTES, PcmFrameSource, silence_frame
 
 _HEADROOM = 0.7
 _clamp_max = 32767.0

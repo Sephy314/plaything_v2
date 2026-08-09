@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from core.exceptions import PlaybackError, VoiceException
 from core.logger import get_logger

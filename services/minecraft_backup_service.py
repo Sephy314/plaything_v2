@@ -54,9 +54,7 @@ class MinecraftBackupService:
     # Public API
     # ------------------------------------------------------------------
 
-    async def create_backup(
-        self, server_name: str, *, created_by: int | None = None
-    ) -> Path:
+    async def create_backup(self, server_name: str, *, created_by: int | None = None) -> Path:
         """Create a world backup for the named server.
 
         Args:
@@ -76,18 +74,14 @@ class MinecraftBackupService:
 
         lock = await self._get_lock(server_name)
         if lock.locked():
-            raise MinecraftBackupInProgress(
-                f"Backup already in progress for '{server_name}'"
-            )
+            raise MinecraftBackupInProgress(f"Backup already in progress for '{server_name}'")
         async with lock:
             try:
                 return await self._create_backup_locked(server)
             except (MinecraftBackupError, MinecraftServerNotFound):
                 raise
             except Exception as exc:  # defensive — wrap anything unexpected
-                raise MinecraftBackupError(
-                    f"Backup failed for '{server_name}': {exc}"
-                ) from exc
+                raise MinecraftBackupError(f"Backup failed for '{server_name}': {exc}") from exc
 
     async def cleanup_old_backups(self, server_name: str) -> list[Path]:
         """Delete expired backups for a server, always keeping the newest one.
@@ -189,9 +183,7 @@ class MinecraftBackupService:
             log.info("backup completed file=%s", filename)
         except (MinecraftBackupError, OSError) as exc:
             log.error("backup failed server=%s: %s", server.alias, exc, exc_info=exc)
-            raise MinecraftBackupError(
-                f"Backup failed for '{server.alias}': {exc}"
-            ) from exc
+            raise MinecraftBackupError(f"Backup failed for '{server.alias}': {exc}") from exc
         finally:
             # Re-enable world saving and clean up the staging directory even on failure.
             if running:
@@ -209,9 +201,7 @@ class MinecraftBackupService:
         # are pruned automatically.
         removed = await self.cleanup_old_backups(server.alias)
         if removed:
-            log.info(
-                "removed old backup server=%s count=%s", server.alias, len(removed)
-            )
+            log.info("removed old backup server=%s count=%s", server.alias, len(removed))
         return final_path
 
     @staticmethod
@@ -274,9 +264,7 @@ class MinecraftBackupService:
         with zipfile.ZipFile(zip_path, "r") as archive:
             bad = archive.testzip()
             if bad is not None:
-                raise MinecraftBackupError(
-                    f"Archive is corrupt ({bad}): {zip_path.name}"
-                )
+                raise MinecraftBackupError(f"Archive is corrupt ({bad}): {zip_path.name}")
             if not archive.namelist():
                 raise MinecraftBackupError(f"Archive is empty: {zip_path.name}")
 

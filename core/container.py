@@ -6,12 +6,14 @@ to cogs and startup code without scattering globals.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from config.settings import Settings
 from core.database import Database
 from core.logger import get_logger
 from core.scheduler import Scheduler
+from core.task_manager import TaskManager
 from features.meal.scheduler import MealScheduler
 from features.meal.service import MealService
 from features.minecraft.scheduler import MinecraftBackupScheduler
@@ -21,6 +23,7 @@ from repository.user_repository import UserRepository
 from repository.voice_repository import VoiceRepository
 from services.minecraft_backup_service import MinecraftBackupService
 from services.minecraft_service import MinecraftService
+from services.system_service import SystemService
 from services.tts_voice_service import TTSVoiceService
 from services.user_service import UserService
 from services.voice_service import VoiceService
@@ -39,6 +42,10 @@ class Container:
         self.settings = settings
         self.database = Database(settings.database_dsn)
         self.scheduler = Scheduler(timezone=settings.timezone)
+        self.task_manager = TaskManager()
+        self.started_at = datetime.now(UTC)
+        #: Process exit code requested by an admin lifecycle command, or None.
+        self.shutdown_exit_code: int | None = None
 
         self.user_repository = UserRepository(self.database)
         self.voice_repository = VoiceRepository(self.database)
@@ -64,6 +71,8 @@ class Container:
             self.meal_service,
             timezone=settings.timezone,
         )
+
+        self.system_service = SystemService(self)
 
         self.youtube = YoutubeClient()
         self.tts_providers = ProviderRegistry()

@@ -158,11 +158,11 @@ PostgreSQL 컨테이너가 healthy 상태가 될 때까지 기다린 후 봇이 
 | `MC_BACKUP_RETENTION_DAYS` | `90` | 이 기간(일)보다 오래된 백업 삭제 (서버별 최신 1개는 항상 유지) |
 | `MC_BACKUP_HOUR` / `MC_BACKUP_MINUTE` | `4` / `0` | 매일 자동 백업 시간(24h); 모든 서버 백업 후 오래된 백업 정리 |
 | `FFMPEG_EXECUTABLE` | `ffmpeg` | 오디오 재생에 사용할 FFmpeg 실행 파일 |
-| `LOG_CHANNEL_ID` | `0` | 로그 Embed를 보낼 Discord 채널 (`0`이면 비활성) |
+| `LOG_CHANNEL_ID` | **필수** | 로그 Embed를 보낼 Discord 채널 (없으면 봇이 시작을 거부) |
 
 ## 명령어
 
-모든 명령어는 **슬래시 커맨드**(애플리케이션 커맨드)이며, 봇 시작 시 자동으로 동기화됩니다. 레거시 텍스트 접두사(`!`)도 `BOT_PREFIX`로 설정되어 있습니다.
+모든 명령어는 **슬래시 커맨드**(애플리케이션 커맨드)이며, 봇 시작 시 자동으로 동기화됩니다. 텍스트 접두사는 비활성화되어 있으며 봇은 슬래시 커맨드에만 응답합니다.
 
 ### Minecraft — `/마크_*`
 
@@ -177,14 +177,17 @@ PostgreSQL 컨테이너가 healthy 상태가 될 때까지 기다린 후 봇이 
 | `/마크_서버` | 관리 중인 모든 서버 목록 | — |
 | `/마크_로그 <alias>` | `latest.log` 최근 50줄 표시 | — |
 | `/마크_명령어 <alias> <command>` | RCON 명령 실행 | 게임 내 OP |
-| `/마크_uuid등록 <user> <uuid>` | Discord 유저 ↔ Minecraft UUID 연결 | 관리자 |
-| `/마크_화이트리스트 <alias> <add\|remove> <nickname>` | 화이트리스트 관리 | — |
+| `/마크_uuid등록 <user> <uuid>` | Discord 유저 ↔ Minecraft UUID 연결 (등록 즉시 전체 서버 화이트리스트 자동 반영) | 관리자 |
+| `/마크_등록 <uuid>` | 자신의 Minecraft UUID 등록 (서버 멤버 누구나, 전체 화이트리스트 자동 반영) | — |
+| `/마크_화이트리스트 <alias> <add\|remove> <닉네임/멘션>` | 화이트리스트 관리 (Discord 멘션/닉네임 또는 Minecraft 닉네임) | — |
 | `/마크_맵가져오기 <alias> [port]` | 외부 서버 폴더를 가져와 관리 서버로 등록 (Psql 반영 + 화이트리스트/OP 적용) | 관리자 |
 | `/마크_백업 <alias>` | 서버 월드 백업 생성 | 관리자 |
 
 동작 요약:
 
-- `/마크_생성`은 폴더 생성 → 기본 파일(`server.properties`, `eula.txt`, whitelist/ops) 작성 → DB Insert를 원자적으로 수행하며, 실패 시 폴더를 삭제하고 롤백합니다. `white-list=true`와 RCON이 기본 활성화됩니다.
+- `/마크_생성`은 폴더 생성 → 기본 파일(`server.properties`, `eula.txt`, whitelist/ops) 작성 → DB Insert를 원자적으로 수행하며, 실패 시 폴더를 삭제하고 롤백합니다. `white-list=true`와 RCON이 기본 활성화됩니다. 생성 시 모든 등록된 유저가 화이트리스트에 자동 반영됩니다(OP는 생성자만).
+- `/마크_등록`/`/마크_uuid등록`으로 DB(`minecraft_users`)에 등록된 유저는 모든 관리 서버의 화이트리스트에 자동 추가됩니다. 실행 중인 서버는 RCON으로 즉시 반영되고, 정지된 서버는 `whitelist.json`에 기록되어 다음 시작 시 적용됩니다.
+- `/마크_화이트리스트`의 대상은 Minecraft 닉네임뿐 아니라 Discord 멘션(`<@id>`)이나 서버 닉네임도 허용하며, Discord 멤버로 인식되면 등록된 UUID로 화이트리스트를 처리합니다. 멤버 닉네임 해석을 위해 Server Members Intent(권한 인텐트)가 필요합니다.
 - `/마크_맵가져오기`는 이미 디스크에 존재하는 외부 서버/맵 폴더를 `MC_PARENT_DIRECTORY`에서 찾아 PostgreSQL `minecraft_servers`에 등록합니다(관리자 전용). 등록 시 폴더의 `server.properties`에서 포트를 읽고(없으면 자동 할당), RCON·whitelist 강제를 활성화한 뒤, `/마크_uuid등록`으로 연결된 모든 유저를 `whitelist.json`/`ops.json`에 반영합니다. 맵 폴더를 Discord로 올릴 필요 없이 호스트에 폴더만 두면 됩니다.
 - `/마크_백업`(관리자 전용)은 서버 월드(`world/`, `world_nether/`, `world_the_end/`), 서버 설정(`server.properties`, `bukkit.yml`, `spigot.yml`, `config/paper-global.yml`), 플러그인 데이터(`plugins/`)를 `<MC_BACKUP_DIRECTORY>/<alias>/<alias>-YYYYMMDD-HHmmss.backup.zip`로 압축합니다. 실행 중인 서버는 `save-off` → `save-all flush` → `save-on` 순서로 안전하게 백업하며, 실패 시 기존 백업을 유지하고 저장을 다시 켭니다. `MC_BACKUP_RETENTION_DAYS`보다 오래된 백업은 자동 삭제되며 서버별 최신 백업 1개는 항상 유지됩니다.
 - `/마크_명령어`는 Discord 권한이 아닌 **서버 `ops.json`의 OP 여부**로 검증합니다.
@@ -233,6 +236,14 @@ PostgreSQL 컨테이너가 healthy 상태가 될 때까지 기다린 후 봇이 
 | --- | --- |
 | `/help [category]` | 전체 명령어 개요 또는 특정 카테고리(`minecraft`, `music`, `tts`, `meal`) 상세 도움말 |
 
+### 관리자 / 운영
+
+| 명령어 | 설명 | 권한 |
+| --- | --- | --- |
+| `/봇_종료` | 봇을 안전하게 종료 | 관리자 |
+| `/봇_재시작` | 봇을 안전하게 재시작 (컨테이너/systemd가 재실행) | 관리자 |
+| `/봇_상태` | 상태 확인: 봇, 핑, DB, 스케줄러, 음성, 업타임 | 모두 |
+
 ## 스케줄링
 
 - **급식 일일 작업** — `Asia/Seoul` 기준 매일 `07:00` cron 트리거 (`features/meal/scheduler.py`). `MEAL_URL`에 `&MLSV_YMD=<yyyyMMdd>`를 붙여 조회하고, NEIS 파서(`INFO-000` 성공 / `INFO-200` 급식 없음)를 적용해 `MEAL_CHANNEL_ID`(없으면 `LOG_CHANNEL_ID`)로 게시합니다. 18시 이후에는 "내일" 급식을 기준으로 날짜를 계산합니다. 모든 실패(HTTP / 타임아웃 / 파서 / Discord 전송)는 예외를 잡아 로그로 기록하며 봇은 크래시하지 않습니다.
@@ -280,10 +291,54 @@ Discord 채널 Embed
 
 구조화 이벤트는 `core.logger.log_event(logger, "Event Name", level=..., **details)`로 남깁니다. 기록되는 이벤트:
 
-- **Bot**: Started / Ready / Shutdown / Reconnect / Exception
+- **Bot**: Started / Ready / Shutdown / Reconnect / Exception / Unhandled Loop Exception
 - **Scheduler**: Started / Stopped / job error / job missed
 - **Meal**: Fetch Started / Fetch Success / Fetch Failed
 - **Minecraft / TTS / Music**: 일반 `log.info` / `log.error` 호출도 자동으로 Embed에 반영됩니다.
+
+## 운영 (관리자)
+
+### 권한 구조
+
+- **일반 사용자** — TTS, YouTube, 음악 제어, 음성 종료.
+- **관리자** (Discord `Administrator` 권한 또는 서버 소유자) — 봇 종료/재시작, Minecraft UUID 관리, 시스템 관리.
+
+모든 관리자 권한 게이트는 `core/permissions.py`의 공용 `@admin_only()` 데코레이터로 구현됩니다 (슬래시·접두사 명령 모두 동작).
+
+### 안전 종료 (Graceful Shutdown)
+
+`/봇_종료`는 `bot/main.py`에서 전체 정리 절차를 실행합니다:
+
+```text
+명령 → 권한 검사 → 스케줄러 중지 → 백그라운드 작업 취소
+→ 음성 연결 종료 → Minecraft 서버 저장·종료 → 급식 서비스 종료
+→ "Bot Shutdown" 로그 → 로그 워커 중지 → Discord 로그아웃 → DB 풀 종료 → exit(0)
+```
+
+### 안전 재시작 (Graceful Restart)
+
+`/봇_재시작`은 동일한 정리 후 **코드 42**로 프로세스를 종료합니다. Docker의 `restart: unless-stopped` 정책(또는 `Restart=on-failure`를 쓴 systemd 유닛)이 자동으로 프로세스를 다시 띄웁니다.
+
+### 상태 확인 (Health Check)
+
+`/봇_상태`는 봇 온라인 / 핑(ms) / 데이터베이스(ok|error) / 스케줄러(running|stopped) / 음성 연결 수 / 업타임 / 버전을 표시합니다.
+
+### 백그라운드 작업
+
+`core/task_manager.py`가 모든 장기 실행 작업을 추적하며, `shutdown()`은 종료 시 작업을 취소·대기하여 고아 코루틴이 남지 않게 합니다.
+
+### 설정 검증
+
+`DATABASE_DSN`과 `DISCORD_TOKEN`은 필수입니다 (pydantic). `LOG_CHANNEL_ID`도 시작 시 필수입니다 — 없으면 운영 로깅이 불가능하므로 명확한 오류와 함께 시작을 중단합니다.
+
+## 문제 해결 (Troubleshooting)
+
+- **슬래시 커맨드가 안 보이거나 자동완성이 안 됨** — 커맨드는 프로세스 시작 시 1회 동기화됩니다. 배포 후 봇을 재시작하고 Discord 클라이언트를 새로고침하세요. 전역 커맨드 변경은 반영에 시간이 걸릴 수 있습니다.
+- **`LOG_CHANNEL_ID` 없음** — 봇이 시작을 거부합니다. 봇이 Embed를 보낼 수 있는 Discord 채널로 설정하세요.
+- **컨테이너가 새 코드를 실행하지 않음** — 이미지를 반드시 재빌드해야 합니다: `docker compose up -d --build`. 소스가 바뀌어도 옛 이미지는 이전 동작을 유지합니다.
+- **Minecraft 서버가 시작 안 됨** — `MC_PARENT_DIRECTORY`가 컨테이너에 마운트됐는지, Paper/vanilla flavor에 맞는 `MC_JAVA_COMMAND` / `MC_SERVER_VERSION`인지 확인하세요.
+- **봇이 계속 재연결됨** — `LOG_CHANNEL_ID`와 Discord 토큰/intents가 올바른지 확인하고 `logs/bot.log` 또는 컨테이너 journal을 살펴보세요.
+- **데이터베이스 오류** — Postgres 컨테이너가 healthy인지(`docker compose ps`), `DATABASE_DSN`이 올바른 host/port를 가리키는지 확인하세요.
 
 ## 테스트 & 린트
 
@@ -291,17 +346,17 @@ Discord 채널 Embed
 pip install -e ".[dev]"
 ruff check .
 black --check .
-pytest
-pytest --cov=core --cov=features --cov-report=term-missing   # 커버리지
+pytest                        # unit + integration + e2e
+pytest --cov --cov-report=term-missing   # 커버리지
 ```
 
-테스트 파일:
+테스트 구조:
 
-- `tests/test_meal.py` — 정상 조회 / 급식 없음 / API 실패 / 파서 실패 / Discord 전송
-- `tests/test_meal_commands.py` — `/급식`, `/급식날짜` 성공·실패·날짜 검증
-- `tests/test_scheduler.py` — 작업 등록(07:00, Asia/Seoul), 실행, 예외 처리
-- `tests/test_logger.py` — 콘솔/파일/Discord 핸들러, 큐 동작, Embed 렌더링, 워커
-- `tests/test_minecraft_connection.py`, `tests/test_music.py` — 연결 및 음악 파이프라인 테스트
+- `tests/unit/` — 단위 테스트 (급식, 마인크래프트, 음악, 로거, 스케줄러, 권한, 태스크 매니저, DB ping, 음성 매니저)
+- `tests/integration/` — 서비스 + 컨테이너 결합 (시스템 서비스 상태/수명주기, 컨테이너 조립)
+- `tests/e2e/` — 커맨드 플로우 테스트 (관리자 코그 슬래시 + 접두사)
+
+CI (GitHub Actions): `.github/workflows/test.yml` (PostgreSQL 서비스 → 마이그레이션 → pytest + 커버리지), `.github/workflows/lint.yml` (ruff + black).
 
 ## 라이선스
 

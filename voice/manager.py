@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from discord import VoiceClient, VoiceState
 from discord.ext.commands import Bot
@@ -85,7 +86,7 @@ class VoiceManager:
                 if before.channel and not after.channel:
                     await self._drop(self._connection_for_guild_id(after.guild.id))
                 return
-            
+
             # Auto-leave if no users remain in the bot's voice channel
             guild_id = after.guild.id
             connection = self._connection_for_guild_id(guild_id)
@@ -150,6 +151,18 @@ class VoiceManager:
             return
         await self._drop(connection)
 
+    async def shutdown_all(self) -> None:
+        """Disconnect every active voice connection (bot shutdown).
+
+        Drops audio and disconnects all guild voice clients so no voice
+        resource is left behind during a graceful shutdown.
+        """
+        connections = list(self._connections.values())
+        for connection in connections:
+            await self._drop(connection)
+        if connections:
+            log.info("disconnected voice in %d guild(s)", len(connections))
+
     # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
@@ -162,6 +175,11 @@ class VoiceManager:
         """Return whether the given guild has an active connection."""
         connection = self.get_connection(ctx_or_guildid)
         return bool(connection and connection.is_connected)
+
+    @property
+    def connection_count(self) -> int:
+        """Return the number of guilds with a tracked voice connection."""
+        return len(self._connections)
 
     # ------------------------------------------------------------------
     # Internals

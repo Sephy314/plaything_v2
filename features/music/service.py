@@ -6,7 +6,8 @@ without depending on Discord context or commands.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from core.exceptions import VoiceException, YoutubeError
 from core.logger import get_logger
