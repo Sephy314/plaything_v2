@@ -10,6 +10,7 @@ RCON execution is gated behind Minecraft in-game OP permission instead.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 import discord
@@ -178,6 +179,37 @@ async def whitelist_action_autocomplete(
         for a in actions
         if a.name.lower().startswith(current_lower) or a.value.lower().startswith(current_lower)
     ]
+
+
+async def whitelist_target_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for the whitelist target: Discord members.
+
+    Suggests guild members matching the current input so admins can pick a
+    member by nickname. Raw Minecraft nicknames are still accepted — they just
+    don't match a member, so the input passes through unchanged.
+    """
+    guild = interaction.guild
+    if guild is None or not guild.members:
+        return []
+    lowered = current.lower()
+    choices: list[app_commands.Choice[str]] = []
+    for member in guild.members:
+        candidates = [member.name, member.display_name]
+        if member.nick:
+            candidates.append(member.nick)
+        if any(lowered in (n or "").lower() for n in candidates if n):
+            choices.append(
+                app_commands.Choice(
+                    name=f"{member.display_name} (Discord 유저)",
+                    value=member.name,
+                )
+            )
+        if len(choices) >= 25:
+            break
+    return choices
 
 
 async def external_folder_autocomplete(
@@ -427,7 +459,36 @@ class MinecraftCog(FeatureCog):
             await self._handle_error(interaction, exc)
             return
         await interaction.followup.send(
-            f"UUID 등록 완료: <@{user.discord_id}> → `{user.minecraft_uuid}`"
+            f"UUID 등록 완료: <@{user.discord_id}> → `{user.minecraft_uuid}`\n"
+            "등록된 모든 서버 화이트리스트에 자동 추가되었습니다."
+        )
+
+    @app_commands.command(
+        name="마크_등록",
+        description="자신의 Minecraft UUID를 등록해 모든 서버 화이트리스트에 자동 추가됩니다.",
+    )
+    @app_commands.describe(minecraft_uuid="Minecraft UUID")
+    async def mc_register_self(
+        self,
+        interaction: discord.Interaction,
+        minecraft_uuid: str,
+    ) -> None:
+        """Register the invoking member's own Minecraft UUID (self-service).
+
+        Once registered the member is automatically whitelisted on every
+        managed server, so any Discord server member is allowed by default.
+        """
+        await interaction.response.defer()
+        try:
+            user = await self._service.register_uuid(
+                interaction.user.id, minecraft_uuid.strip()
+            )
+        except Exception as exc:
+            await self._handle_error(interaction, exc)
+            return
+        await interaction.followup.send(
+            f"UUID 등록 완료: <@{user.discord_id}> → `{user.minecraft_uuid}`\n"
+            "등록된 모든 서버 화이트리스트에 자동 추가되었습니다."
         )
 
     # ------------------------------------------------------------------
@@ -438,27 +499,45 @@ class MinecraftCog(FeatureCog):
     @app_commands.describe(
         alias="서버 별명",
         action="add (추가) 또는 remove (제거)",
-        nickname="플레이어 닉네임",
+        target="플레이어 닉네임 또는 Discord 멘션/닉네임",
     )
     @app_commands.autocomplete(alias=server_autocomplete)
     @app_commands.autocomplete(action=whitelist_action_autocomplete)
+    @app_commands.autocomplete(target=whitelist_target_autocomplete)
     async def mc_whitelist(
         self,
         interaction: discord.Interaction,
         alias: str,
         action: Literal["add", "remove"],
-        nickname: str,
+        target: str,
     ) -> None:
-        """Add or remove a nickname from the server's whitelist."""
+        """Add or remove a player from the server's whitelist.
+
+        ``target`` accepts either a raw Minecraft nickname or a Discord member
+        (mention like ``<@1234>``, or a nickname/name). Discord members are
+        resolved to their registered Minecraft UUID before the whitelist
+        change is applied.
+        """
         await interaction.response.defer()
         try:
-            output = await self._service.whitelist(alias.strip(), action, nickname.strip())
+            member = await self._resolve_member(interaction, target)
+            if member is not None:
+                output = await self._service.whitelist_user(
+                    alias.strip(), action, member.id
+                )
+                label = member.mention
+            else:
+                output = await self._service.whitelist(alias.strip(), action, target.strip())
+                label = f"**{target.strip()}**"
+        except MinecraftUnauthorized as exc:
+            await interaction.followup.send(f"⚠️ {exc}")
+            return
         except Exception as exc:
             await self._handle_error(interaction, exc)
             return
         verb = "추가" if action == "add" else "제거"
         await interaction.followup.send(
-            f"화이트리스트 {verb} 완료: **{nickname}**\n```{output[:500]}```"
+            f"화이트리스트 {verb} 완료: {label}\n```{output[:500]}```"
         )
 
     # ------------------------------------------------------------------
@@ -540,6 +619,42 @@ class MinecraftCog(FeatureCog):
             f"포트: {info['port']} | 폴더: `{info['folder']}`\n"
             f"접속자: {info['player_count']}명 ({', '.join(info['online_players']) or '없음'})"
         )
+
+    @staticmethod
+    async def _resolve_member(
+        interaction: discord.Interaction,
+        target: str,
+    ) -> discord.Member | None:
+        """Resolve a whitelist target string to a Discord member, if possible.
+
+        Handles mentions (``<@id>`` / ``<@!id>``) and exact case-insensitive
+        matches against a member's global name, display name or server
+        nickname. Returns ``None`` when the input is not a known Discord
+        member — callers then treat it as a raw Minecraft nickname.
+        """
+        stripped = target.strip()
+        guild = interaction.guild
+        if guild is None:
+            return None
+
+        mention = re.fullmatch(r"<@!?(\d+)>", stripped)
+        if mention:
+            member = guild.get_member(int(mention.group(1)))
+            if member is None:
+                try:
+                    member = await guild.fetch_member(int(mention.group(1)))
+                except (discord.NotFound, discord.HTTPException):
+                    return None
+            return member
+
+        lowered = stripped.lower()
+        for member in guild.members:
+            candidates = [member.name, member.display_name]
+            if member.nick:
+                candidates.append(member.nick)
+            if any((n or "").lower() == lowered for n in candidates):
+                return member
+        return None
 
     async def _handle_error(self, interaction: discord.Interaction, exc: Exception) -> None:
         """Reply with a friendly, specific message for the exception type."""

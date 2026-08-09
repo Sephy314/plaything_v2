@@ -27,6 +27,10 @@ def build_intents() -> Intents:
     intents = Intents.default()
     intents.message_content = True
     intents.voice_states = True
+    # Server Members intent: needed to resolve Discord nicknames/mentions into
+    # guild members for Minecraft whitelist management. Must also be enabled
+    # in the Discord Developer Portal (privileged intent).
+    intents.members = True
     return intents
 
 

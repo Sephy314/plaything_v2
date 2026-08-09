@@ -175,14 +175,17 @@ All commands are **slash commands** (application commands) and are synced automa
 | `/마크_서버` | List all managed servers | — |
 | `/마크_로그 <alias>` | Show the last 50 lines of `latest.log` | — |
 | `/마크_명령어 <alias> <command>` | Run an RCON command | In-game OP |
-| `/마크_uuid등록 <user> <uuid>` | Link a Discord user ↔ Minecraft UUID | Admin |
-| `/마크_화이트리스트 <alias> <add\|remove> <nickname>` | Manage the whitelist | — |
+| `/마크_uuid등록 <user> <uuid>` | Link a Discord user ↔ Minecraft UUID (auto-whitelisted on all servers immediately) | Admin |
+| `/마크_등록 <uuid>` | Register your own Minecraft UUID (any server member; auto-whitelisted everywhere) | — |
+| `/마크_화이트리스트 <alias> <add\|remove> <target>` | Manage the whitelist (Discord mention/nickname or Minecraft nickname) | — |
 | `/마크_맵가져오기 <alias> [port]` | Import an external server/map folder as a managed server (registered in PostgreSQL, whitelist/OP applied) | Admin |
 | `/마크_백업 <alias>` | Create a server world backup | Admin |
 
 Behavior notes:
 
-- `/마크_생성` atomically creates the folder, writes the default files (`server.properties`, `eula.txt`, whitelist/ops), and inserts the DB row — rolling back (deleting the folder) on failure. `white-list=true` and RCON are enabled by default.
+- `/마크_생성` atomically creates the folder, writes the default files (`server.properties`, `eula.txt`, whitelist/ops), and inserts the DB row — rolling back (deleting the folder) on failure. `white-list=true` and RCON are enabled by default. All registered members are added to the new server's whitelist (only the creator becomes OP).
+- Users registered in the DB (`minecraft_users`) via `/마크_등록` or `/마크_uuid등록` are automatically whitelisted on every managed server — applied immediately over RCON on running servers and written to `whitelist.json` for stopped servers.
+- `/마크_화이트리스트` accepts a Minecraft nickname, a Discord mention (`<@id>`), or a server nickname; recognized Discord members are whitelisted by their registered UUID. The Server Members intent is required for nickname resolution.
 - `/마크_맵가져오기` (admin-only) finds an existing external server/map folder under `MC_PARENT_DIRECTORY`, registers it in the PostgreSQL `minecraft_servers` table, reads the port from the folder's `server.properties` (or auto-assigns one), enables RCON / whitelist enforcement, and applies every Discord↔UUID-registered member to the folder's `whitelist.json` / `ops.json`. Instead of uploading the map folder to Discord, just place the folder on the host.
 - `/마크_백업` (admin-only) snapshots the server world (`world/`, `world_nether/`, `world_the_end/`), server config (`server.properties`, `bukkit.yml`, `spigot.yml`, `config/paper-global.yml`) and `plugins/` into `<MC_BACKUP_DIRECTORY>/<alias>/<alias>-YYYYMMDD-HHmmss.backup.zip`. While the server runs it uses `save-off` → `save-all flush` → `save-on`; a failed backup keeps existing archives and re-enables world saving. Backups older than `MC_BACKUP_RETENTION_DAYS` are pruned automatically (the newest backup per server is always kept).
 - `/마크_명령어` is gated by the **server's `ops.json` OP status**, not by Discord permissions.
