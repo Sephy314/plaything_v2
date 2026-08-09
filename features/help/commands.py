@@ -69,6 +69,11 @@ HELP_DATA = {
                 "description": "화이트리스트 관리 (Discord 닉네임/멘션 또는 Minecraft 닉네임)",
             },
             {
+                "name": "/마크_전체화이트리스트",
+                "args": "<서버이름>",
+                "description": "등록된 모든 유저를 기존 서버 화이트리스트에 일괄 추가 (관리자)",
+            },
+            {
                 "name": "/마크_등록",
                 "args": "<UUID>",
                 "description": "내 Minecraft UUID 등록 → 전체 서버 화이트리스트 자동 추가",

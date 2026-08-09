@@ -238,3 +238,60 @@ async def test_sync_all_whitelists_applies_registered_members(tmp_path: Path) ->
     await service._sync_all_whitelists(server)
 
     assert {e["uuid"] for e in _read_whitelist(folder)} == {_UUID_A, _UUID_B}
+
+
+@pytest.mark.asyncio
+async def test_whitelist_all_users_stopped_server_skips_existing(tmp_path: Path) -> None:
+    folder = tmp_path / "testy"
+    folder.mkdir()
+    (folder / "whitelist.json").write_text(
+        json.dumps([{"uuid": _UUID_A, "name": ""}]), encoding="utf-8"
+    )
+    repo = _FakeRepo()
+    repo._users[111] = _make_user(111, _UUID_A)
+    repo._users[222] = _make_user(222, _UUID_B)
+    repo._servers = [_make_server("testy", folder)]
+    service = minecraft_service.MinecraftService(repo, _make_settings(tmp_path))
+
+    applied = await service.whitelist_all_users("testy")
+
+    assert applied == 1
+    assert {e["uuid"] for e in _read_whitelist(folder)} == {_UUID_A, _UUID_B}
+    # Re-running is a no-op.
+    assert await service.whitelist_all_users("testy") == 0
+
+
+@pytest.mark.asyncio
+async def test_whitelist_all_users_running_server_uses_rcon(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    folder = tmp_path / "testy"
+    folder.mkdir()
+    repo = _FakeRepo()
+    repo._users[111] = _make_user(111, _UUID_A)
+    repo._users[222] = _make_user(222, _UUID_B)
+    server = _make_server("testy", folder)
+    repo._servers = [server]
+    service = minecraft_service.MinecraftService(repo, _make_settings(tmp_path))
+    service._processes[server.id] = object()
+
+    monkeypatch.setattr(minecraft_service, "RCONClient", _FakeRCONClient)
+    _FakeRCONClient.instances.clear()
+
+    applied = await service.whitelist_all_users("testy")
+
+    assert applied == 2
+    commands = [i.command_name for i in _FakeRCONClient.instances]
+    assert commands == [f"whitelist add {_UUID_A}", f"whitelist add {_UUID_B}"]
+
+
+@pytest.mark.asyncio
+async def test_whitelist_all_users_no_registered_users(tmp_path: Path) -> None:
+    folder = tmp_path / "testy"
+    folder.mkdir()
+    repo = _FakeRepo()
+    repo._servers = [_make_server("testy", folder)]
+    service = minecraft_service.MinecraftService(repo, _make_settings(tmp_path))
+
+    assert await service.whitelist_all_users("testy") == 0
+    assert _read_whitelist(folder) == []

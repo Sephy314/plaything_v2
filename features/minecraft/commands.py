@@ -534,6 +534,35 @@ class MinecraftCog(FeatureCog):
         verb = "추가" if action == "add" else "제거"
         await interaction.followup.send(f"화이트리스트 {verb} 완료: {label}\n```{output[:500]}```")
 
+    @app_commands.command(
+        name="마크_전체화이트리스트",
+        description="등록된 모든 유저를 기존 서버의 화이트리스트에 추가합니다. (관리자)",
+    )
+    @app_commands.describe(alias="서버 별명")
+    @app_commands.autocomplete(alias=server_autocomplete)
+    @app_commands.default_permissions(administrator=True)
+    async def mc_whitelist_all(
+        self,
+        interaction: discord.Interaction,
+        alias: str,
+    ) -> None:
+        """Whitelist every DB-registered user on an existing server.
+
+        Useful for existing maps/servers created before automatic
+        whitelisting was introduced — re-applies the full registered member
+        list. Running servers are updated immediately over RCON; stopped
+        servers get their ``whitelist.json`` updated.
+        """
+        await interaction.response.defer()
+        try:
+            applied = await self._service.whitelist_all_users(alias.strip())
+        except Exception as exc:
+            await self._handle_error(interaction, exc)
+            return
+        await interaction.followup.send(
+            f"**{alias}** 서버 화이트리스트 반영 완료. (새로 추가: {applied}명)"
+        )
+
     # ------------------------------------------------------------------
     # External server folder migration (admin-only)
     # ------------------------------------------------------------------

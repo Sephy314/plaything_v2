@@ -524,6 +524,65 @@ class MinecraftService:
         )
         return f"whitelist {verb} {user.minecraft_uuid}: {detail}"
 
+    async def whitelist_all_users(self, alias: str) -> int:
+        """Whitelist every DB-registered user on an existing server.
+
+        Useful for existing maps/servers that were set up before automatic
+        whitelisting was introduced, or to re-apply the full member list.
+        Users already on the whitelist are skipped. Running servers get each
+        missing user applied over RCON immediately; stopped servers get
+        ``whitelist.json`` updated directly.
+
+        Args:
+            alias: The server alias.
+
+        Returns:
+            The number of newly applied users.
+        """
+        server = await self.find_server(alias)
+        users = await self._repository.list_users()
+        folder = Path(server.folder_path)
+        existing = {
+            self._normalize_uuid(e.get("uuid"))
+            for e in _load_json_list(folder / "whitelist.json")
+            if isinstance(e, dict) and self._normalize_uuid(e.get("uuid"))
+        }
+        missing = [
+            user for user in users if self._normalize_uuid(user.minecraft_uuid) not in existing
+        ]
+        if not missing:
+            log.info(
+                "bulk whitelist already complete: alias=%s total=%s",
+                alias,
+                len(users),
+            )
+            return 0
+
+        applied = 0
+        if server.id in self._processes:
+            for user in missing:
+                try:
+                    await self._rcon_exec(server, f"whitelist add {user.minecraft_uuid}")
+                    applied += 1
+                except MinecraftRconError:
+                    log.warning(
+                        "RCON whitelist add failed for %s (uuid=%s); skipping",
+                        server.alias,
+                        user.minecraft_uuid,
+                    )
+        else:
+            for user in missing:
+                if self._ensure_whitelist_entry(folder, user.minecraft_uuid):
+                    applied += 1
+        log.info(
+            "bulk whitelist applied: alias=%s total=%s missing=%s applied=%s",
+            alias,
+            len(users),
+            len(missing),
+            applied,
+        )
+        return applied
+
     async def read_logs(self, alias: str, lines: int = 50) -> str:
         """Read the last N lines of the server's latest.log file."""
         server = await self.find_server(alias)
