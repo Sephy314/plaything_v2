@@ -34,8 +34,7 @@ class Settings(BaseSettings):
     meal_channel_id: int = Field(
         0,
         description=(
-            "Discord channel id for the daily meal output "
-            "(0 = fall back to LOG_CHANNEL_ID)"
+            "Discord channel id for the daily meal output " "(0 = fall back to LOG_CHANNEL_ID)"
         ),
     )
     timezone: str = Field(
@@ -77,12 +76,8 @@ class Settings(BaseSettings):
         90,
         description="Delete backups older than this many days (kept while no newer backup exists)",
     )
-    mc_backup_hour: int = Field(
-        4, description="Hour (24h) of the daily automatic world backup"
-    )
-    mc_backup_minute: int = Field(
-        0, description="Minute of the daily automatic world backup"
-    )
+    mc_backup_hour: int = Field(4, description="Hour (24h) of the daily automatic world backup")
+    mc_backup_minute: int = Field(0, description="Minute of the daily automatic world backup")
     ffmpeg_executable: str = Field("ffmpeg", description="FFmpeg executable for audio playback")
 
     @field_validator("database_dsn")

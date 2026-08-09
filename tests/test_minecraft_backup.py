@@ -86,9 +86,7 @@ def _make_world_folder(folder: Path) -> None:
         "spark:\n  enabled: false\n", encoding="utf-8"
     )
     (folder / "plugins" / "Example").mkdir(parents=True)
-    (folder / "plugins" / "Example" / "config.yml").write_text(
-        "enabled: true\n", encoding="utf-8"
-    )
+    (folder / "plugins" / "Example" / "config.yml").write_text("enabled: true\n", encoding="utf-8")
 
 
 def _make_backup(backup_dir: Path, server: str, age_days: int) -> Path:
@@ -198,9 +196,7 @@ async def test_backup_in_progress_raises(tmp_path: Path) -> None:
 
 
 def test_parse_backup_timestamp_with_hyphenated_server() -> None:
-    ts = MinecraftBackupService._parse_backup_timestamp(
-        "survival-2-20260101-000000.backup.zip"
-    )
+    ts = MinecraftBackupService._parse_backup_timestamp("survival-2-20260101-000000.backup.zip")
     assert ts == datetime(2026, 1, 1, 0, 0, 0)
 
 
@@ -211,9 +207,7 @@ def test_parse_backup_timestamp_with_hyphenated_server() -> None:
 
 @pytest.mark.asyncio
 async def test_retention_case1_old_with_newer_is_deleted(tmp_path: Path) -> None:
-    service = MinecraftBackupService(
-        _FakeMC(_make_server(tmp_path)), _make_settings(tmp_path)
-    )
+    service = MinecraftBackupService(_FakeMC(_make_server(tmp_path)), _make_settings(tmp_path))
     backup_dir = tmp_path / "backups" / "survival"
     backup_dir.mkdir(parents=True)
     old = _make_backup(backup_dir, "survival", age_days=120)
@@ -228,9 +222,7 @@ async def test_retention_case1_old_with_newer_is_deleted(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_retention_case2_only_old_is_kept(tmp_path: Path) -> None:
-    service = MinecraftBackupService(
-        _FakeMC(_make_server(tmp_path)), _make_settings(tmp_path)
-    )
+    service = MinecraftBackupService(_FakeMC(_make_server(tmp_path)), _make_settings(tmp_path))
     backup_dir = tmp_path / "backups" / "survival"
     backup_dir.mkdir(parents=True)
     old = _make_backup(backup_dir, "survival", age_days=120)
@@ -243,9 +235,7 @@ async def test_retention_case2_only_old_is_kept(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_retention_case3_recent_is_kept(tmp_path: Path) -> None:
-    service = MinecraftBackupService(
-        _FakeMC(_make_server(tmp_path)), _make_settings(tmp_path)
-    )
+    service = MinecraftBackupService(_FakeMC(_make_server(tmp_path)), _make_settings(tmp_path))
     backup_dir = tmp_path / "backups" / "survival"
     backup_dir.mkdir(parents=True)
     recent = _make_backup(backup_dir, "survival", age_days=10)
@@ -260,9 +250,7 @@ async def test_retention_case3_recent_is_kept(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_retention_case4_servers_do_not_interfere(tmp_path: Path) -> None:
-    service = MinecraftBackupService(
-        _FakeMC(_make_server(tmp_path)), _make_settings(tmp_path)
-    )
+    service = MinecraftBackupService(_FakeMC(_make_server(tmp_path)), _make_settings(tmp_path))
     surv_dir = tmp_path / "backups" / "survival"
     crea_dir = tmp_path / "backups" / "creative"
     surv_dir.mkdir(parents=True)
@@ -323,9 +311,7 @@ async def test_backup_all_tolerates_failures(tmp_path: Path) -> None:
         async def list_servers(self) -> list[MinecraftServer]:
             return list(self._servers)
 
-    service = MinecraftBackupService(
-        _MultiMC([ok_server, bad_server]), _make_settings(tmp_path)
-    )
+    service = MinecraftBackupService(_MultiMC([ok_server, bad_server]), _make_settings(tmp_path))
 
     total, failures = await service.backup_all()
 

@@ -480,9 +480,7 @@ class MinecraftCog(FeatureCog):
         """
         await interaction.response.defer()
         try:
-            user = await self._service.register_uuid(
-                interaction.user.id, minecraft_uuid.strip()
-            )
+            user = await self._service.register_uuid(interaction.user.id, minecraft_uuid.strip())
         except Exception as exc:
             await self._handle_error(interaction, exc)
             return
@@ -522,9 +520,7 @@ class MinecraftCog(FeatureCog):
         try:
             member = await self._resolve_member(interaction, target)
             if member is not None:
-                output = await self._service.whitelist_user(
-                    alias.strip(), action, member.id
-                )
+                output = await self._service.whitelist_user(alias.strip(), action, member.id)
                 label = member.mention
             else:
                 output = await self._service.whitelist(alias.strip(), action, target.strip())
@@ -536,9 +532,7 @@ class MinecraftCog(FeatureCog):
             await self._handle_error(interaction, exc)
             return
         verb = "추가" if action == "add" else "제거"
-        await interaction.followup.send(
-            f"화이트리스트 {verb} 완료: {label}\n```{output[:500]}```"
-        )
+        await interaction.followup.send(f"화이트리스트 {verb} 완료: {label}\n```{output[:500]}```")
 
     # ------------------------------------------------------------------
     # External server folder migration (admin-only)

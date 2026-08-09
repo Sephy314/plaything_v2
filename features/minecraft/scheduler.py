@@ -87,9 +87,7 @@ class MinecraftBackupScheduler:
         try:
             await self._backup_service.cleanup_all()
         except Exception as exc:
-            log.error(
-                "automatic backup retention cleanup failed: %s", exc, exc_info=exc
-            )
+            log.error("automatic backup retention cleanup failed: %s", exc, exc_info=exc)
 
         log_event(
             log,
