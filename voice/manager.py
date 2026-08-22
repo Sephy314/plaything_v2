@@ -81,14 +81,17 @@ class VoiceManager:
             before: VoiceState,
             after: VoiceState,
         ) -> None:
+            guild_id = self._guild_id_from_voice_event(member, before, after)
+            if guild_id is None:
+                return
+
             # Clean up if the bot disconnects
             if member.id == self._bot.user.id:
                 if before.channel and not after.channel:
-                    await self._drop(self._connection_for_guild_id(after.guild.id))
+                    await self._drop(self._connection_for_guild_id(guild_id))
                 return
 
             # Auto-leave if no users remain in the bot's voice channel
-            guild_id = after.guild.id
             connection = self._connection_for_guild_id(guild_id)
             if connection and connection.voice_client and connection.voice_client.channel:
                 channel = connection.voice_client.channel
@@ -100,6 +103,21 @@ class VoiceManager:
 
     def _connection_for_guild_id(self, guild_id: int) -> GuildConnection | None:
         return self._connections.get(guild_id)
+
+    @staticmethod
+    def _guild_id_from_voice_event(member, before: VoiceState, after: VoiceState) -> int | None:
+        """Resolve a guild id from a voice-state event.
+
+        discord.py ``VoiceState`` has no ``guild`` attribute. After a user
+        leaves voice, ``after.channel`` is also ``None``, so the guild must
+        come from the member or the previous channel.
+        """
+        guild = getattr(member, "guild", None)
+        if guild is None:
+            channel = getattr(before, "channel", None) or getattr(after, "channel", None)
+            guild = getattr(channel, "guild", None)
+        guild_id = getattr(guild, "id", None)
+        return int(guild_id) if guild_id is not None else None
 
     # ------------------------------------------------------------------
     # Lifecycle
