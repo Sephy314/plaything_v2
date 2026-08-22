@@ -251,7 +251,12 @@ class MinecraftBackupService:
                     info = zipfile.ZipInfo(arcname + "/")
                     archive.writestr(info, b"")
                 elif path.is_file():
-                    archive.write(path, arcname, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+                    archive.write(
+                        path,
+                        arcname,
+                        compress_type=zipfile.ZIP_DEFLATED,
+                        compresslevel=9,
+                    )
                 # Broken symlinks / special files are skipped.
 
     @staticmethod
