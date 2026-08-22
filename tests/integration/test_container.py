@@ -22,6 +22,8 @@ def test_container_wires_services() -> None:
     assert container.scheduler is not None
     assert container.task_manager is not None
     assert container.minecraft_service is not None
+    assert container.minecraft_backup_service is not None
+    assert container.minecraft_backup_scheduler is not None
     assert container.meal_service is not None
     assert container.system_service is not None
     assert container.voice_manager is None  # bound later in bind_bot

@@ -2,9 +2,8 @@
 
 Creates per-server world backups as ``<server>-YYYYMMDD-HHmmss.backup.zip``
 under a configurable root directory, following an atomic save-and-copy flow so
-a failed backup never destroys existing backups. A retention policy removes
-backups older than the configured window only when a newer backup exists for
-the same server (each server keeps at least its newest backup).
+a failed backup never destroys existing backups. After every successful backup,
+retention keeps only the newest two archives per server (latest + previous).
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ import asyncio
 import re
 import shutil
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from config.settings import Settings
@@ -39,6 +38,9 @@ _CONFIG_FILES = ("server.properties", "bukkit.yml", "spigot.yml")
 
 # paper-global.yml lives under config/ on Paper.
 _PAPER_GLOBAL_PATH = "config/paper-global.yml"
+
+# Retention always keeps latest and previous backup per server.
+_BACKUP_KEEP_COUNT = 2
 
 
 class MinecraftBackupService:
@@ -84,10 +86,7 @@ class MinecraftBackupService:
                 raise MinecraftBackupError(f"Backup failed for '{server_name}': {exc}") from exc
 
     async def cleanup_old_backups(self, server_name: str) -> list[Path]:
-        """Delete expired backups for a server, always keeping the newest one.
-
-        A backup is removed only when it is older than the retention window
-        AND a newer backup exists for the same server.
+        """Delete old backups for a server, always keeping the newest two.
 
         Args:
             server_name: The server alias.
@@ -99,15 +98,12 @@ class MinecraftBackupService:
         if not backup_dir.is_dir():
             return []
 
-        backups = sorted(self._list_backups(backup_dir))
-        # Keep at least the newest backup; older ones are candidates.
-        if len(backups) <= 1:
+        backups = sorted(self._list_backups(backup_dir), key=self._backup_sort_key, reverse=True)
+        if len(backups) <= _BACKUP_KEEP_COUNT:
             return []
 
         removed: list[Path] = []
-        for path in backups[:-1]:
-            if not self._is_expired(path):
-                continue
+        for path in backups[_BACKUP_KEEP_COUNT:]:
             try:
                 path.unlink()
             except OSError as exc:
@@ -255,7 +251,12 @@ class MinecraftBackupService:
                     info = zipfile.ZipInfo(arcname + "/")
                     archive.writestr(info, b"")
                 elif path.is_file():
-                    archive.write(path, arcname)
+                    archive.write(
+                        path,
+                        arcname,
+                        compress_type=zipfile.ZIP_DEFLATED,
+                        compresslevel=9,
+                    )
                 # Broken symlinks / special files are skipped.
 
     @staticmethod
@@ -286,12 +287,13 @@ class MinecraftBackupService:
     # Retention internals
     # ------------------------------------------------------------------
 
-    def _is_expired(self, path: Path) -> bool:
-        timestamp = self._parse_backup_timestamp(path.name)
-        if timestamp is None:
-            return False  # unknown naming convention — never delete
-        age = datetime.now() - timestamp
-        return age > timedelta(days=max(0, self._settings.mc_backup_retention_days))
+    @classmethod
+    def _backup_sort_key(cls, path: Path) -> tuple[datetime, float]:
+        """Sort key for backups: parsed timestamp first, then mtime fallback."""
+        parsed = cls._parse_backup_timestamp(path.name)
+        if parsed is not None:
+            return parsed, path.stat().st_mtime
+        return datetime.min, path.stat().st_mtime
 
     @staticmethod
     def _parse_backup_timestamp(name: str) -> datetime | None:
