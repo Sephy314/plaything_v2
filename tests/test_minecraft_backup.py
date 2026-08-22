@@ -3,7 +3,7 @@
 Covers per-server backup creation (path / filename / zip contents / required
 files), the save flow when the server is running, failure safety (existing
 backups kept, staging cleaned up, world saving resumed), and the retention
-policy (the four documented cases).
+policy (keep newest two archives per server).
 """
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ async def test_backup_creates_archive_with_required_files(tmp_path: Path) -> Non
     assert backup_path.parent == backup_dir
     assert re.match(r"^survival-\d{8}-\d{6}\.backup\.zip$", backup_path.name)
 
-    # Valid zip containing the required world / config / plugin data.
+    # Valid compressed zip containing the required world / config / plugin data.
     with zipfile.ZipFile(backup_path, "r") as archive:
         names = archive.namelist()
         assert "world/region/r.0.0.mca" in names
@@ -128,6 +128,15 @@ async def test_backup_creates_archive_with_required_files(tmp_path: Path) -> Non
         assert "spigot.yml" in names
         assert "config/paper-global.yml" in names
         assert "plugins/Example/config.yml" in names
+        for name in (
+            "world/region/r.0.0.mca",
+            "server.properties",
+            "bukkit.yml",
+            "spigot.yml",
+            "config/paper-global.yml",
+            "plugins/Example/config.yml",
+        ):
+            assert archive.getinfo(name).compress_type == zipfile.ZIP_DEFLATED
 
 
 @pytest.mark.asyncio
@@ -210,14 +219,16 @@ async def test_retention_case1_old_with_newer_is_deleted(tmp_path: Path) -> None
     service = MinecraftBackupService(_FakeMC(_make_server(tmp_path)), _make_settings(tmp_path))
     backup_dir = tmp_path / "backups" / "survival"
     backup_dir.mkdir(parents=True)
-    old = _make_backup(backup_dir, "survival", age_days=120)
-    new = _make_backup(backup_dir, "survival", age_days=0)
+    oldest = _make_backup(backup_dir, "survival", age_days=120)
+    previous = _make_backup(backup_dir, "survival", age_days=10)
+    latest = _make_backup(backup_dir, "survival", age_days=0)
 
     removed = await service.cleanup_old_backups("survival")
 
-    assert removed == [old]
-    assert not old.exists()
-    assert new.exists()
+    assert removed == [oldest]
+    assert not oldest.exists()
+    assert previous.exists()
+    assert latest.exists()
 
 
 @pytest.mark.asyncio
@@ -226,11 +237,13 @@ async def test_retention_case2_only_old_is_kept(tmp_path: Path) -> None:
     backup_dir = tmp_path / "backups" / "survival"
     backup_dir.mkdir(parents=True)
     old = _make_backup(backup_dir, "survival", age_days=120)
+    newer = _make_backup(backup_dir, "survival", age_days=5)
 
     removed = await service.cleanup_old_backups("survival")
 
     assert removed == []
     assert old.exists()
+    assert newer.exists()
 
 
 @pytest.mark.asyncio
@@ -238,14 +251,16 @@ async def test_retention_case3_recent_is_kept(tmp_path: Path) -> None:
     service = MinecraftBackupService(_FakeMC(_make_server(tmp_path)), _make_settings(tmp_path))
     backup_dir = tmp_path / "backups" / "survival"
     backup_dir.mkdir(parents=True)
+    old = _make_backup(backup_dir, "survival", age_days=30)
     recent = _make_backup(backup_dir, "survival", age_days=10)
-    newer = _make_backup(backup_dir, "survival", age_days=0)
+    newest = _make_backup(backup_dir, "survival", age_days=0)
 
     removed = await service.cleanup_old_backups("survival")
 
-    assert removed == []
+    assert removed == [old]
+    assert not old.exists()
     assert recent.exists()
-    assert newer.exists()
+    assert newest.exists()
 
 
 @pytest.mark.asyncio
@@ -256,6 +271,7 @@ async def test_retention_case4_servers_do_not_interfere(tmp_path: Path) -> None:
     surv_dir.mkdir(parents=True)
     crea_dir.mkdir(parents=True)
     surv_old = _make_backup(surv_dir, "survival", age_days=120)
+    surv_prev = _make_backup(surv_dir, "survival", age_days=3)
     surv_new = _make_backup(surv_dir, "survival", age_days=0)
     crea_old = _make_backup(crea_dir, "creative", age_days=120)
     crea_new = _make_backup(crea_dir, "creative", age_days=0)
@@ -264,9 +280,104 @@ async def test_retention_case4_servers_do_not_interfere(tmp_path: Path) -> None:
 
     # Survival cleanup only touches survival backups.
     assert removed == [surv_old]
+    assert surv_prev.exists()
     assert surv_new.exists()
     assert crea_old.exists()
     assert crea_new.exists()
+
+
+@pytest.mark.asyncio
+async def test_retention_keeps_exactly_two_newest(tmp_path: Path) -> None:
+    service = MinecraftBackupService(_FakeMC(_make_server(tmp_path)), _make_settings(tmp_path))
+    backup_dir = tmp_path / "backups" / "survival"
+    backup_dir.mkdir(parents=True)
+    oldest = _make_backup(backup_dir, "survival", age_days=40)
+    older = _make_backup(backup_dir, "survival", age_days=20)
+    previous = _make_backup(backup_dir, "survival", age_days=5)
+    latest = _make_backup(backup_dir, "survival", age_days=0)
+
+    removed = await service.cleanup_old_backups("survival")
+
+    assert set(removed) == {oldest, older}
+    remaining = sorted(backup_dir.glob("*.backup.zip"))
+    assert remaining == [previous, latest]
+
+
+@pytest.mark.asyncio
+async def test_create_backup_prunes_to_two_archives(tmp_path: Path) -> None:
+    folder = tmp_path / "server"
+    _make_world_folder(folder)
+    server = _make_server(folder)
+    service = MinecraftBackupService(_FakeMC(server), _make_settings(tmp_path))
+    backup_dir = tmp_path / "backups" / "survival"
+    backup_dir.mkdir(parents=True)
+    oldest = _make_backup(backup_dir, "survival", age_days=3)
+    previous = _make_backup(backup_dir, "survival", age_days=1)
+
+    created = await service.create_backup("survival")
+
+    remaining = sorted(backup_dir.glob("*.backup.zip"))
+    assert created in remaining
+    assert previous in remaining
+    assert oldest not in remaining
+    assert len(remaining) == 2
+
+
+@pytest.mark.asyncio
+async def test_cleanup_all_keeps_two_per_server(tmp_path: Path) -> None:
+    now = datetime.now(UTC)
+    survival = _make_server(tmp_path, alias="survival")
+    creative = MinecraftServer(
+        id=2,
+        alias="creative",
+        folder_path=str(tmp_path),
+        port=25566,
+        status="stopped",
+        created_by=123,
+        created_at=now,
+        updated_at=now,
+    )
+
+    class _MultiMC(_FakeMC):
+        def __init__(self, servers: list[MinecraftServer]) -> None:
+            self._servers = servers
+
+        async def list_servers(self) -> list[MinecraftServer]:
+            return list(self._servers)
+
+    service = MinecraftBackupService(_MultiMC([survival, creative]), _make_settings(tmp_path))
+    surv_dir = tmp_path / "backups" / "survival"
+    crea_dir = tmp_path / "backups" / "creative"
+    surv_dir.mkdir(parents=True)
+    crea_dir.mkdir(parents=True)
+    surv_old = _make_backup(surv_dir, "survival", age_days=9)
+    surv_prev = _make_backup(surv_dir, "survival", age_days=2)
+    surv_new = _make_backup(surv_dir, "survival", age_days=0)
+    crea_old = _make_backup(crea_dir, "creative", age_days=8)
+    crea_prev = _make_backup(crea_dir, "creative", age_days=3)
+    crea_new = _make_backup(crea_dir, "creative", age_days=0)
+
+    removed = await service.cleanup_all()
+
+    assert removed["survival"] == [surv_old]
+    assert removed["creative"] == [crea_old]
+    assert surv_prev.exists() and surv_new.exists()
+    assert crea_prev.exists() and crea_new.exists()
+
+
+def test_create_archive_deflates_repeated_payload(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    payload = staging / "world.dat"
+    payload.write_bytes(b"A" * 64_000)
+
+    MinecraftBackupService._create_archive(staging, "survival-20260101-000000.backup.zip")
+
+    archive_path = staging / "survival-20260101-000000.backup.zip"
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        info = archive.getinfo("world.dat")
+        assert info.compress_type == zipfile.ZIP_DEFLATED
+        assert info.compress_size < info.file_size
 
 
 # ----------------------------------------------------------------------
