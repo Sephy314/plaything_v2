@@ -129,7 +129,7 @@ class MealService:
             await asyncio.wait_for(
                 channel.send(self.format_message(result)), timeout=self._send_timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.error(
                 "failed to send meal message within %ss (Discord request stalled)",
                 self._send_timeout,

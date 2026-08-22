@@ -76,10 +76,8 @@ class MealScheduler:
         today = self._service.default_date()
         log_event(log, "Meal Fetch Started", details={"date": today})
         try:
-            result = await asyncio.wait_for(
-                self._service.send_meal(today), timeout=self._timeout
-            )
-        except asyncio.TimeoutError:
+            result = await asyncio.wait_for(self._service.send_meal(today), timeout=self._timeout)
+        except TimeoutError:
             # A stalled request must NOT leave the job hanging: with
             # max_instances=1 the scheduler would skip every later run.
             log_event(
