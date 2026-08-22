@@ -10,6 +10,7 @@ service can be tested without real network or Discord access.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -25,6 +26,9 @@ log = get_logger(__name__)
 
 #: Default HTTP timeout for meal API requests (seconds).
 DEFAULT_TIMEOUT = 10.0
+#: Hard cap for posting the message to Discord (discord.py does not set its
+#: own HTTP timeout, so a stalled REST request would otherwise hang forever).
+DEFAULT_SEND_TIMEOUT = 30.0
 #: Emojis applied to menu lines for a friendly output.
 MENU_EMOJIS = ["🍚", "🍲", "🍖", "🍎"]
 #: Timezone used to compute the "today" date.
@@ -52,12 +56,14 @@ class MealService:
         parser: Callable[[dict[str, Any]], MealResult | None] = parse_meal_response,
         channel_provider: Callable[[], Any] | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        send_timeout: float = DEFAULT_SEND_TIMEOUT,
     ) -> None:
         self._meal_url = meal_url
         self._http_get = http_get or self._default_get
         self._parser = parser
         self._channel_provider = channel_provider
         self._timeout = timeout
+        self._send_timeout = send_timeout
         self._session: aiohttp.ClientSession | None = None
 
     # ------------------------------------------------------------------
@@ -110,12 +116,28 @@ class MealService:
             return None
 
         channel = self._channel_provider() if self._channel_provider else None
-        if channel is not None:
-            try:
-                await channel.send(self.format_message(result))
-            except Exception:
-                log.exception("failed to send meal message")
-                raise
+        if channel is None:
+            # A fetched meal silently dropped is hard to diagnose — make it visible.
+            log.warning(
+                "meal found for date %s but no target channel is available "
+                "(check MEAL_CHANNEL_ID / LOG_CHANNEL_ID) — meal not posted",
+                result.date or today or self.default_date(),
+            )
+            return result
+
+        try:
+            await asyncio.wait_for(
+                channel.send(self.format_message(result)), timeout=self._send_timeout
+            )
+        except TimeoutError:
+            log.error(
+                "failed to send meal message within %ss (Discord request stalled)",
+                self._send_timeout,
+            )
+            raise
+        except Exception:
+            log.exception("failed to send meal message")
+            raise
         return result
 
     @staticmethod

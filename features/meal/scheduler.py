@@ -8,6 +8,7 @@ send error) is caught and logged so the bot never crashes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from core.logger import get_logger, log_event
@@ -18,6 +19,11 @@ MEAL_HOUR = 7
 MEAL_MINUTE = 0
 MEAL_TIMEZONE = "Asia/Seoul"
 MEAL_JOB_ID = "meal_daily"
+#: Hard cap for the whole fetch + publish step. Without it, a stalled NEIS or
+#: Discord request keeps the job "running" forever, and because the job uses
+#: ``max_instances=1`` every later daily run gets skipped until the bot is
+#: restarted — which looks exactly like "the meal cron stopped posting".
+MEAL_SEND_TIMEOUT = 60
 
 
 class MealScheduler:
@@ -29,10 +35,18 @@ class MealScheduler:
         timezone: IANA timezone for the cron trigger (default Asia/Seoul).
     """
 
-    def __init__(self, scheduler, service, *, timezone: str = MEAL_TIMEZONE) -> None:
+    def __init__(
+        self,
+        scheduler,
+        service,
+        *,
+        timezone: str = MEAL_TIMEZONE,
+        timeout: float = MEAL_SEND_TIMEOUT,
+    ) -> None:
         self._scheduler = scheduler
         self._service = service
         self._timezone = timezone
+        self._timeout = timeout
 
     def register(self) -> None:
         """Register the daily meal job (idempotent)."""
@@ -62,7 +76,22 @@ class MealScheduler:
         today = self._service.default_date()
         log_event(log, "Meal Fetch Started", details={"date": today})
         try:
-            result = await self._service.send_meal(today)
+            result = await asyncio.wait_for(self._service.send_meal(today), timeout=self._timeout)
+        except TimeoutError:
+            # A stalled request must NOT leave the job hanging: with
+            # max_instances=1 the scheduler would skip every later run.
+            log_event(
+                log,
+                "Meal Fetch Timeout",
+                level=logging.ERROR,
+                date=today,
+                error=f"send_meal exceeded {self._timeout}s",
+            )
+            log.error(
+                "meal fetch timed out after %ss — job recovered so future runs are not skipped",
+                self._timeout,
+            )
+            return
         except Exception as exc:
             log_event(
                 log,
