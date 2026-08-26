@@ -38,6 +38,29 @@ class FakeSystem:
     async def health(self) -> dict:
         return self.health_result
 
+    async def log_channel_status(self) -> dict:
+        return {
+            "channel_id": 1534900319039918166,
+            "configured": True,
+            "found": True,
+            "name": "logs",
+            "mention": "<#1534900319039918166>",
+            "type": "TextChannel",
+            "log_channel_id": 1534900319039918166,
+        }
+
+    async def meal_channel_status(self) -> dict:
+        return {
+            "channel_id": 1534900319039918166,
+            "configured": True,
+            "found": True,
+            "name": "meal",
+            "mention": "<#1534900319039918166>",
+            "type": "TextChannel",
+            "meal_channel_id": 0,
+            "log_channel_id": 1534900319039918166,
+        }
+
 
 class FakeBot:
     def event(self, func):
@@ -119,3 +142,52 @@ def test_format_uptime() -> None:
     assert AdminCog._format_uptime(59) == "59초"
     assert AdminCog._format_uptime(3661) == "1시간 1분 1초"
     assert AdminCog._format_uptime(90061) == "1일 1시간 1분 1초"
+
+
+@pytest.mark.asyncio
+async def test_slash_debug_log_channel_renders_status() -> None:
+    cog = _make_cog(FakeSystem())
+    interaction = FakeInteraction()
+
+    await cog.slash_debug_log_channel.callback(cog, interaction)
+
+    assert interaction.response.deferred is True
+    assert "로그 채널" in interaction.followup.messages[0]
+    assert "🟢" in interaction.followup.messages[0]
+
+
+@pytest.mark.asyncio
+async def test_slash_debug_meal_channel_renders_status() -> None:
+    cog = _make_cog(FakeSystem())
+    interaction = FakeInteraction()
+
+    await cog.slash_debug_meal_channel.callback(cog, interaction)
+
+    assert "급식 채널" in interaction.followup.messages[0]
+    assert "🟢" in interaction.followup.messages[0]
+
+
+@pytest.mark.asyncio
+async def test_slash_debug_meal_channel_unresolved_renders_error() -> None:
+    system = FakeSystem()
+
+    async def unresolved() -> dict:
+        return {
+            "channel_id": 999,
+            "configured": True,
+            "found": False,
+            "name": None,
+            "mention": None,
+            "type": None,
+            "meal_channel_id": 999,
+            "log_channel_id": 0,
+        }
+
+    system.meal_channel_status = unresolved
+    cog = _make_cog(system)
+    interaction = FakeInteraction()
+
+    await cog.slash_debug_meal_channel.callback(cog, interaction)
+
+    assert "🔴" in interaction.followup.messages[0]
+    assert "999" in interaction.followup.messages[0]

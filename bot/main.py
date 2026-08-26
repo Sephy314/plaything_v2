@@ -132,6 +132,10 @@ async def _start_scheduler_on_ready(container) -> None:
         container: The dependency container exposing the scheduler.
     """
     await container.scheduler.start()
+    # Resolve and log the meal target channel at startup (INFO with id, or
+    # ERROR when unresolvable) so a misconfigured channel is visible
+    # immediately instead of silently dropping the daily meal.
+    await container.resolve_meal_channel()
 
 
 async def _register_jobs(container) -> None:

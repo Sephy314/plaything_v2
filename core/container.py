@@ -80,6 +80,8 @@ class Container:
         self.voice_manager: VoiceManager | None = None
         self.log_queue: Any | None = None
         self.bot = None
+        #: Cached meal target channel resolved at startup (see resolve_meal_channel).
+        self._meal_channel = None
 
     def bind_bot(self, bot) -> None:
         """Attach the Discord bot and voice manager after bot creation.
@@ -97,12 +99,50 @@ class Container:
 
     def _meal_channel_provider(self):
         """Return the channel for meal output, or ``None`` if unavailable."""
-        if self.bot is None:
-            return None
         channel_id = self.settings.meal_channel_id or self.settings.log_channel_id
         if not channel_id:
             return None
+        if self._meal_channel is not None and self._meal_channel.id == channel_id:
+            return self._meal_channel
+        if self.bot is None:
+            return None
         return self.bot.get_channel(channel_id)
+
+    async def resolve_meal_channel(self) -> None:
+        """Resolve the meal target channel at startup and log the outcome.
+
+        Tries the bot's channel cache first, then the REST API, so a valid
+        channel is found even when it is not cached. Logs the resolved channel
+        (INFO, with its id) so operators can see where the daily meal posts, or
+        an ERROR when it cannot be resolved — the first thing to check when the
+        meal is not being posted.
+        """
+        channel_id = self.settings.meal_channel_id or self.settings.log_channel_id
+        if not channel_id:
+            log.error(
+                "meal channel not configured: MEAL_CHANNEL_ID and LOG_CHANNEL_ID are both unset"
+            )
+            return
+        channel = self.bot.get_channel(channel_id) if self.bot is not None else None
+        if channel is None and self.bot is not None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except Exception as exc:
+                log.error("meal channel %s could not be fetched via REST: %s", channel_id, exc)
+                return
+        if channel is None:
+            log.error(
+                "meal channel %s could not be resolved — meal will not be posted "
+                "(check MEAL_CHANNEL_ID / LOG_CHANNEL_ID)",
+                channel_id,
+            )
+            return
+        self._meal_channel = channel
+        log.info(
+            "meal channel resolved: %s (id=%s)",
+            getattr(channel, "name", "?"),
+            channel.id,
+        )
 
     def _build_audio(self, voice_client: Any) -> AudioManager:
         """Construct an :class:`AudioManager` bound to a voice client.
