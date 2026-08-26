@@ -1,10 +1,12 @@
 """Admin / operations commands.
 
-Provides administrator-only lifecycle commands (shutdown, restart) and a
-health-check command available to everyone, exposed as slash commands only.
+Provides administrator-only lifecycle commands (shutdown, restart), channel
+checks (log room, meal room) and a health-check command available to everyone,
+exposed as slash commands only.
 
 Permission model:
-- Shutdown / restart → Discord Administrator (or guild owner) via ``@admin_only``.
+- Shutdown / restart / channel checks → Discord Administrator (or guild owner)
+  via ``@admin_only``.
 - Health status → available to any user.
 """
 
@@ -68,6 +70,32 @@ class AdminCog(FeatureCog):
         await interaction.response.defer()
         await interaction.followup.send(await self._format_health())
 
+    @app_commands.command(name="debug_log_channel", description="로그 채널 상태 확인 (관리자)")
+    @admin_only()
+    async def slash_debug_log_channel(self, interaction: discord.Interaction) -> None:
+        """Report the resolved log channel (admin/internal)."""
+        await interaction.response.defer()
+        try:
+            status = await self._system.log_channel_status()
+        except Exception as exc:
+            log.error("log channel check failed: %s", exc, exc_info=exc)
+            await interaction.followup.send("⚠️ 로그 채널 확인 중 오류가 발생했습니다.")
+            return
+        await interaction.followup.send(self._format_channel_report("로그 채널", status))
+
+    @app_commands.command(name="debug_meal_channel", description="급식 채널 확인 (관리자)")
+    @admin_only()
+    async def slash_debug_meal_channel(self, interaction: discord.Interaction) -> None:
+        """Report the resolved meal channel (admin/internal)."""
+        await interaction.response.defer()
+        try:
+            status = await self._system.meal_channel_status()
+        except Exception as exc:
+            log.error("meal channel check failed: %s", exc, exc_info=exc)
+            await interaction.followup.send("⚠️ 급식 채널 확인 중 오류가 발생했습니다.")
+            return
+        await interaction.followup.send(self._format_channel_report("급식 채널", status))
+
     # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
@@ -95,6 +123,31 @@ class AdminCog(FeatureCog):
             f"- 🎙️ 음성 연결: `{health['voice_connections']}개`\n"
             f"- ⏱️ 업타임: `{uptime}`\n"
             f"- 🏷️ 버전: `{health['version']}`"
+        )
+
+    @staticmethod
+    def _format_channel_report(title: str, status: dict) -> str:
+        """Render a channel-status report for the admin check commands."""
+        config = ""
+        if "meal_channel_id" in status or "log_channel_id" in status:
+            config = (
+                f"- `MEAL_CHANNEL_ID={status.get('meal_channel_id', 0)}`, "
+                f"`LOG_CHANNEL_ID={status.get('log_channel_id', 0)}`\n"
+            )
+        if not status.get("configured"):
+            return f"**{title}**\n" f"- 🔴 설정 없음 (채널 ID가 0 또는 미설정)\n" + config
+        if not status.get("found"):
+            return (
+                f"**{title}**\n"
+                f"- 🔴 해석 불가: 채널 ID `{status['channel_id']}`\n"
+                + config
+                + "- 봇이 해당 채널/길드에 없거나 ID가 잘못되었습니다"
+            )
+        return (
+            f"**{title}**\n"
+            f"- 🟢 해석됨: `{status.get('name')}` {status.get('mention')}\n"
+            f"- ID: `{status['channel_id']}`\n"
+            f"- 타입: `{status.get('type')}`"
         )
 
     @staticmethod

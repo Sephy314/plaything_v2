@@ -66,6 +66,72 @@ class SystemService:
         }
 
     # ------------------------------------------------------------------
+    # Channel status
+    # ------------------------------------------------------------------
+
+    async def log_channel_status(self) -> dict[str, Any]:
+        """Resolve the configured log channel and report its status.
+
+        Returns:
+            A dict describing whether the log channel is configured and
+            resolvable (cache, then REST).
+        """
+        channel_id = self._container.settings.log_channel_id
+        channel = await self._resolve_channel(channel_id)
+        report = self._channel_report(channel_id, channel)
+        report["log_channel_id"] = channel_id
+        return report
+
+    async def meal_channel_status(self) -> dict[str, Any]:
+        """Re-resolve the meal target channel and report its status.
+
+        Re-runs the startup resolution (cache, then REST) so the report
+        reflects the current Discord state rather than a stale cached value.
+
+        Returns:
+            A dict describing the effective meal channel plus the configured
+            ``MEAL_CHANNEL_ID`` / ``LOG_CHANNEL_ID`` values.
+        """
+        settings = self._container.settings
+        await self._container.resolve_meal_channel()
+        effective_id = settings.meal_channel_id or settings.log_channel_id
+        report = self._channel_report(effective_id, self._container._meal_channel_provider())
+        report.update(
+            {
+                "meal_channel_id": settings.meal_channel_id,
+                "log_channel_id": settings.log_channel_id,
+            }
+        )
+        return report
+
+    async def _resolve_channel(self, channel_id: int) -> Any:
+        """Resolve a channel id from the bot cache, then the REST API."""
+        if not channel_id:
+            return None
+        bot = self._container.bot
+        if bot is None:
+            return None
+        channel = bot.get_channel(channel_id)
+        if channel is not None:
+            return channel
+        try:
+            return await bot.fetch_channel(channel_id)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _channel_report(channel_id: int, channel: Any) -> dict[str, Any]:
+        """Build a serialisable channel-status report."""
+        return {
+            "channel_id": channel_id,
+            "configured": bool(channel_id),
+            "found": channel is not None,
+            "name": getattr(channel, "name", None),
+            "mention": getattr(channel, "mention", None),
+            "type": type(channel).__name__ if channel is not None else None,
+        }
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
