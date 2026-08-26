@@ -108,5 +108,3 @@ class MealScheduler:
             "Meal Fetch Success",
             details={"date": today, "has_meal": "yes" if result is not None else "no"},
         )
-        if result is not None:
-            log.info("meal published for date %s", today)

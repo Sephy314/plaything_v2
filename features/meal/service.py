@@ -138,6 +138,12 @@ class MealService:
         except Exception:
             log.exception("failed to send meal message")
             raise
+        log.info(
+            "meal published to %s (id=%s) for date %s",
+            getattr(channel, "name", "?"),
+            getattr(channel, "id", "?"),
+            result.date or today or self.default_date(),
+        )
         return result
 
     @staticmethod
