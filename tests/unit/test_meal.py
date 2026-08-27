@@ -177,6 +177,33 @@ async def test_send_meal_publishes_to_channel() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_meal_uses_injected_channel_even_if_provider_missing() -> None:
+    """The daily cron must post via the injected channel even when the channel
+    provider (cache lookup) returns ``None`` — the production failure mode."""
+    sent: list[str] = []
+
+    class FakeChannel:
+        async def send(self, content: str) -> None:
+            sent.append(content)
+
+    async def fake_get(url: str) -> tuple[int, str]:
+        return 200, json.dumps(_success_payload())
+
+    service = MealService(
+        "http://meal.test/api",
+        http_get=fake_get,
+        channel_provider=lambda: None,
+    )
+    service.set_channel(FakeChannel())
+
+    result = await service.send_meal("20260806")
+
+    assert result is not None
+    assert len(sent) == 1
+    assert "오늘의 급식" in sent[0]
+
+
+@pytest.mark.asyncio
 async def test_send_meal_no_meal_sends_nothing() -> None:
     sent: list[str] = []
 
