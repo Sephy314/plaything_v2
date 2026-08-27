@@ -109,19 +109,21 @@ class Container:
         return self.bot.get_channel(channel_id)
 
     async def resolve_meal_channel(self) -> None:
-        """Resolve the meal target channel at startup and log the outcome.
+        """Resolve the meal target channel and inject it into the meal service.
 
         Tries the bot's channel cache first, then the REST API, so a valid
-        channel is found even when it is not cached. Logs the resolved channel
-        (INFO, with its id) so operators can see where the daily meal posts, or
-        an ERROR when it cannot be resolved — the first thing to check when the
-        meal is not being posted.
+        channel is found even when it is not cached. The resolved channel is
+        injected directly into :class:`MealService` so the daily cron uses it
+        even if the bot's cache misses at 07:00. Logs the resolved channel
+        (INFO, with its id) or an ERROR when it cannot be resolved — the first
+        thing to check when the meal is not being posted.
         """
         channel_id = self.settings.meal_channel_id or self.settings.log_channel_id
         if not channel_id:
             log.error(
                 "meal channel not configured: MEAL_CHANNEL_ID and LOG_CHANNEL_ID are both unset"
             )
+            self.meal_service.set_channel(None)
             return
         channel = self.bot.get_channel(channel_id) if self.bot is not None else None
         if channel is None and self.bot is not None:
@@ -129,6 +131,7 @@ class Container:
                 channel = await self.bot.fetch_channel(channel_id)
             except Exception as exc:
                 log.error("meal channel %s could not be fetched via REST: %s", channel_id, exc)
+                self.meal_service.set_channel(None)
                 return
         if channel is None:
             log.error(
@@ -136,8 +139,10 @@ class Container:
                 "(check MEAL_CHANNEL_ID / LOG_CHANNEL_ID)",
                 channel_id,
             )
+            self.meal_service.set_channel(None)
             return
         self._meal_channel = channel
+        self.meal_service.set_channel(channel)
         log.info(
             "meal channel resolved: %s (id=%s)",
             getattr(channel, "name", "?"),

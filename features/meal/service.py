@@ -65,6 +65,9 @@ class MealService:
         self._timeout = timeout
         self._send_timeout = send_timeout
         self._session: aiohttp.ClientSession | None = None
+        #: Channel injected directly via :meth:`set_channel` (bypasses the
+        #: ``channel_provider`` cache lookup at send time).
+        self._channel: Any = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -100,6 +103,16 @@ class MealService:
 
         return self._parser(payload)
 
+    def set_channel(self, channel: Any) -> None:
+        """Directly inject the target channel for meal output.
+
+        The daily cron fires at 07:00, when the bot's channel cache may not
+        hold the target channel. The resolved channel is injected here and
+        used directly at send time instead of relying on a cache lookup
+        (``bot.get_channel``) that can return ``None``.
+        """
+        self._channel = channel
+
     async def send_meal(self, today: str | None = None) -> MealResult | None:
         """Fetch today's meal and post it to the configured channel.
 
@@ -115,7 +128,10 @@ class MealService:
             log.info("no meal for date %s — skipping output", today or self.default_date())
             return None
 
-        channel = self._channel_provider() if self._channel_provider else None
+        # Prefer the directly-injected channel; fall back to the provider.
+        channel = self._channel
+        if channel is None and self._channel_provider is not None:
+            channel = self._channel_provider()
         if channel is None:
             # A fetched meal silently dropped is hard to diagnose — make it visible.
             log.warning(
