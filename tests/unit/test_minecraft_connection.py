@@ -246,6 +246,42 @@ async def test_ensure_runtime_files_creates_missing_server_properties(
 
 
 @pytest.mark.asyncio
+async def test_ensure_runtime_files_uses_existing_server_jar(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    folder = tmp_path / "testy"
+    folder.mkdir()
+    existing_jar = folder / "paper-unstable-build.jar"
+    existing_jar.write_bytes(b"server")
+
+    server = MinecraftServer(
+        id=1,
+        alias="testy",
+        folder_path=str(folder),
+        port=25565,
+        status="stopped",
+        created_by=123,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    settings = Settings(
+        _env_file=None,
+        database_dsn="postgresql://user:pass@localhost/db",
+        discord_token="token",
+    )
+    service = minecraft_service.MinecraftService(_FakeRepo(server), settings)
+
+    async def _unexpected_download(*args: object, **kwargs: object) -> None:
+        raise AssertionError("an existing server jar should be reused")
+
+    monkeypatch.setattr(service, "_download_server_jar", _unexpected_download)
+
+    jar = await service._ensure_runtime_files(server, folder)
+
+    assert jar == existing_jar
+
+
+@pytest.mark.asyncio
 async def test_ensure_runtime_files_disables_spark_profiler(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -275,7 +275,7 @@ class MinecraftService:
 
         folder = Path(server.folder_path)
         try:
-            await self._ensure_runtime_files(server, folder)
+            jar = await self._ensure_runtime_files(server, folder)
         except MinecraftProcessError:
             raise
         except Exception as exc:
@@ -286,7 +286,7 @@ class MinecraftService:
             java,
             f"-Xmx{self._settings.mc_max_memory}",
             "-jar",
-            self._jar_name(),
+            jar.name,
             "nogui",
         ]
 
@@ -830,17 +830,23 @@ class MinecraftService:
     # Runtime files
     # ------------------------------------------------------------------
 
-    async def _ensure_runtime_files(self, server: MinecraftServer, folder: Path) -> None:
+    async def _ensure_runtime_files(self, server: MinecraftServer, folder: Path) -> Path:
         folder.mkdir(parents=True, exist_ok=True)
         self._ensure_static_files(folder, server.alias, server.port)
         self._ensure_paper_global_config(folder)
-        jar = folder / self._jar_name()
-        if not jar.exists():
+        jar = self._find_existing_server_jar(folder)
+        if jar is None:
+            jar = folder / self._jar_name()
             await self._download_server_jar(jar, self._settings.mc_server_version)
-        if self._is_paper():
-            legacy = folder / "server.jar"
-            if legacy.exists():
-                legacy.unlink()
+        return jar
+
+    def _find_existing_server_jar(self, folder: Path) -> Path | None:
+        """Use a bundled server jar before attempting an API download."""
+        preferred = (folder / self._jar_name(), folder / "paper.jar", folder / "server.jar")
+        for jar in preferred:
+            if jar.is_file():
+                return jar
+        return next(iter(sorted(folder.glob("*.jar"))), None)
 
     def _is_paper(self) -> bool:
         flavor = (self._settings.mc_server_flavor or "paper").strip().lower()
@@ -870,12 +876,18 @@ class MinecraftService:
                         raise MinecraftProcessError(f"Paper version '{version}' not found")
                     resp.raise_for_status()
                     builds = await resp.json()
-                stable = [b for b in builds if b.get("channel") == "STABLE"]
-                if not stable:
+                downloadable = [
+                    b
+                    for b in builds
+                    if (b.get("downloads") or {}).get("server:default", {}).get("url")
+                ]
+                stable = [b for b in downloadable if b.get("channel") == "STABLE"]
+                candidates = stable or downloadable
+                if not candidates:
                     raise MinecraftProcessError(
-                        f"No stable Paper build available for version '{version}'"
+                        f"No downloadable Paper build available for version '{version}'"
                     )
-                build = max(stable, key=lambda b: b.get("id") or 0)
+                build = max(candidates, key=lambda b: b.get("id") or 0)
                 url = (build.get("downloads") or {}).get("server:default", {}).get("url")
                 if not url:
                     raise MinecraftProcessError(
